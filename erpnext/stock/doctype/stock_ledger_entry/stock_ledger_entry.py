@@ -8,6 +8,7 @@ import frappe
 from frappe import _, bold
 from frappe.core.doctype.role.role import get_users
 from frappe.model.document import Document
+from frappe.query_builder.functions import Sum
 from frappe.utils import add_days, cint, flt, formatdate, get_datetime, getdate
 
 from erpnext.accounts.utils import get_fiscal_year
@@ -22,6 +23,10 @@ class StockFreezeError(frappe.ValidationError):
 
 
 class BackDatedStockTransaction(frappe.ValidationError):
+	pass
+
+
+class InventoryDimensionNegativeStockError(frappe.ValidationError):
 	pass
 
 
@@ -51,13 +56,14 @@ class StockLedgerEntry(Document):
 		item_code: DF.Link | None
 		outgoing_rate: DF.Currency
 		posting_date: DF.Date | None
+		posting_datetime: DF.Datetime | None
 		posting_time: DF.Time | None
 		project: DF.Link | None
 		qty_after_transaction: DF.Float
 		recalculate_rate: DF.Check
 		serial_and_batch_bundle: DF.Link | None
 		serial_no: DF.LongText | None
-		stock_queue: DF.Text | None
+		stock_queue: DF.LongText | None
 		stock_uom: DF.Link | None
 		stock_value: DF.Currency
 		stock_value_difference: DF.Currency
@@ -82,6 +88,7 @@ class StockLedgerEntry(Document):
 		self.flags.ignore_submit_comment = True
 		from erpnext.stock.utils import validate_disabled_warehouse, validate_warehouse_company
 
+		self.set_posting_datetime()
 		self.validate_mandatory()
 		self.validate_batch()
 		validate_disabled_warehouse(self.warehouse)
@@ -92,59 +99,62 @@ class StockLedgerEntry(Document):
 		self.validate_with_last_transaction_posting_time()
 		self.validate_inventory_dimension_negative_stock()
 
+	def set_posting_datetime(self):
+		from erpnext.stock.utils import get_combine_datetime
+
+		self.posting_datetime = get_combine_datetime(self.posting_date, self.posting_time)
+
 	def validate_inventory_dimension_negative_stock(self):
-		extra_cond = ""
-		kwargs = {}
+		if self.is_cancelled or self.actual_qty >= 0:
+			return
 
 		dimensions = self._get_inventory_dimensions()
 		if not dimensions:
 			return
 
-		for dimension, values in dimensions.items():
-			kwargs[dimension] = values.get("value")
-			extra_cond += f" and {dimension} = %({dimension})s"
-
-		kwargs.update(
-			{
-				"item_code": self.item_code,
-				"warehouse": self.warehouse,
-				"posting_date": self.posting_date,
-				"posting_time": self.posting_time,
-				"company": self.company,
-				"sle": self.name,
-			}
-		)
-
-		sle = get_previous_sle(kwargs, extra_cond=extra_cond)
-		qty_after_transaction = 0.0
 		flt_precision = cint(frappe.db.get_default("float_precision")) or 2
-		if sle:
-			qty_after_transaction = sle.qty_after_transaction
+		for dimension, values in dimensions.items():
+			dimension_value = values.get("value")
+			available_qty = self.get_available_qty_after_prev_transaction(dimension, dimension_value)
 
-		diff = qty_after_transaction + flt(self.actual_qty)
-		diff = flt(diff, flt_precision)
-		if diff < 0 and abs(diff) > 0.0001:
-			self.throw_validation_error(diff, dimensions)
+			diff = flt(available_qty + flt(self.actual_qty), flt_precision)  # qty after current transaction
+			if diff < 0 and abs(diff) > 0.0001:
+				self.throw_validation_error(diff, dimension, dimension_value)
 
-	def throw_validation_error(self, diff, dimensions):
-		dimension_msg = _(", with the inventory {0}: {1}").format(
-			"dimensions" if len(dimensions) > 1 else "dimension",
-			", ".join(f"{bold(d.doctype)} ({d.value})" for k, d in dimensions.items()),
-		)
+	def get_available_qty_after_prev_transaction(self, dimension, dimension_value):
+		sle = frappe.qb.DocType("Stock Ledger Entry")
+		available_qty = (
+			frappe.qb.from_(sle)
+			.select(Sum(sle.actual_qty))
+			.where(
+				(sle.item_code == self.item_code)
+				& (sle.warehouse == self.warehouse)
+				& (sle.posting_datetime < self.posting_datetime)
+				& (sle.company == self.company)
+				& (sle.is_cancelled == 0)
+				& (sle[dimension] == dimension_value)
+			)
+		).run()
 
+		return available_qty[0][0] or 0
+
+	def throw_validation_error(self, diff, dimension, dimension_value):
 		msg = _(
-			"{0} units of {1} are required in {2}{3}, on {4} {5} for {6} to complete the transaction."
+			"{0} units of {1} are required in {2} with the inventory dimension: {3} ({4}) on {5} {6} for {7} to complete the transaction."
 		).format(
 			abs(diff),
 			frappe.get_desk_link("Item", self.item_code),
 			frappe.get_desk_link("Warehouse", self.warehouse),
-			dimension_msg,
+			frappe.bold(dimension),
+			frappe.bold(dimension_value),
 			self.posting_date,
 			self.posting_time,
 			frappe.get_desk_link(self.voucher_type, self.voucher_no),
 		)
 
-		frappe.throw(msg, title=_("Inventory Dimension Negative Stock"))
+		frappe.throw(
+			msg, title=_("Inventory Dimension Negative Stock"), exc=InventoryDimensionNegativeStockError
+		)
 
 	def _get_inventory_dimensions(self):
 		inv_dimensions = get_inventory_dimensions()
@@ -221,9 +231,7 @@ class StockLedgerEntry(Document):
 			if not self.serial_and_batch_bundle:
 				self.throw_error_message(f"Serial No / Batch No are mandatory for Item {self.item_code}")
 
-		if (
-			self.serial_and_batch_bundle and not item_detail.has_serial_no and not item_detail.has_batch_no
-		):
+		if self.serial_and_batch_bundle and not item_detail.has_serial_no and not item_detail.has_batch_no:
 			self.throw_error_message(f"Serial No and Batch No are not allowed for Item {self.item_code}")
 
 	def throw_error_message(self, message, exception=frappe.ValidationError):
@@ -251,7 +259,9 @@ class StockLedgerEntry(Document):
 			)
 			if older_than_x_days_ago and stock_settings.stock_auth_role not in frappe.get_roles():
 				frappe.throw(
-					_("Not allowed to update stock transactions older than {0}").format(stock_frozen_upto_days),
+					_("Not allowed to update stock transactions older than {0}").format(
+						stock_frozen_upto_days
+					),
 					StockFreezeError,
 				)
 
@@ -269,7 +279,9 @@ class StockLedgerEntry(Document):
 			expiry_date = frappe.db.get_value("Batch", self.batch_no, "expiry_date")
 			if expiry_date:
 				if getdate(self.posting_date) > getdate(expiry_date):
-					frappe.throw(_("Batch {0} of Item {1} has expired.").format(self.batch_no, self.item_code))
+					frappe.throw(
+						_("Batch {0} of Item {1} has expired.").format(self.batch_no, self.item_code)
+					)
 
 	def validate_and_set_fiscal_year(self):
 		if not self.fiscal_year:
@@ -302,7 +314,7 @@ class StockLedgerEntry(Document):
 					(self.item_code, self.warehouse),
 				)[0][0]
 
-				cur_doc_posting_datetime = "%s %s" % (
+				cur_doc_posting_datetime = "{} {}".format(
 					self.posting_date,
 					self.get("posting_time") or "00:00:00",
 				)
@@ -311,7 +323,9 @@ class StockLedgerEntry(Document):
 					last_transaction_time
 				):
 					msg = _("Last Stock Transaction for item {0} under warehouse {1} was on {2}.").format(
-						frappe.bold(self.item_code), frappe.bold(self.warehouse), frappe.bold(last_transaction_time)
+						frappe.bold(self.item_code),
+						frappe.bold(self.warehouse),
+						frappe.bold(last_transaction_time),
 					)
 
 					msg += "<br><br>" + _(
@@ -329,9 +343,7 @@ class StockLedgerEntry(Document):
 
 
 def on_doctype_update():
-	frappe.db.add_index(
-		"Stock Ledger Entry", fields=["posting_date", "posting_time"], index_name="posting_sort_index"
-	)
 	frappe.db.add_index("Stock Ledger Entry", ["voucher_no", "voucher_type"])
 	frappe.db.add_index("Stock Ledger Entry", ["batch_no", "item_code", "warehouse"])
 	frappe.db.add_index("Stock Ledger Entry", ["warehouse", "item_code"], "item_warehouse")
+	frappe.db.add_index("Stock Ledger Entry", ["posting_datetime", "creation"])

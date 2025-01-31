@@ -26,17 +26,20 @@
   "section_break_9",
   "over_delivery_receipt_allowance",
   "mr_qty_allowance",
+  "over_picking_allowance",
   "column_break_121",
   "role_allowed_to_over_deliver_receive",
   "allow_negative_stock",
   "show_barcode_field",
   "clean_description_html",
+  "allow_internal_transfer_at_arms_length_price",
   "quality_inspection_settings_section",
   "action_if_quality_inspection_is_not_submitted",
   "column_break_23",
   "action_if_quality_inspection_is_rejected",
   "stock_reservation_tab",
   "enable_stock_reservation",
+  "auto_reserve_stock",
   "column_break_rx3e",
   "allow_partial_reservation",
   "auto_reserve_stock_for_sales_order_on_purchase",
@@ -44,12 +47,16 @@
   "auto_reserve_serial_and_batch",
   "serial_and_batch_item_settings_tab",
   "section_break_7",
+  "do_not_use_batchwise_valuation",
   "auto_create_serial_and_batch_bundle_for_outward",
   "pick_serial_and_batch_based_on",
+  "naming_series_prefix",
   "column_break_mhzc",
   "disable_serial_no_and_batch_selector",
   "use_naming_series",
-  "naming_series_prefix",
+  "use_serial_batch_fields",
+  "do_not_update_serial_batch_on_creation_of_auto_bundle",
+  "allow_existing_serial_no",
   "stock_planning_tab",
   "auto_material_request",
   "auto_indent",
@@ -416,10 +423,58 @@
   {
    "default": "0",
    "depends_on": "eval: doc.enable_stock_reservation",
-   "description": "Stock will be reserved on submission of <b>Purchase Receipt</b> created against Material Receipt for Sales Order.",
+   "description": "Stock will be reserved on submission of <b>Purchase Receipt</b> created against Material Request for Sales Order.",
    "fieldname": "auto_reserve_stock_for_sales_order_on_purchase",
    "fieldtype": "Check",
    "label": "Auto Reserve Stock for Sales Order on Purchase"
+  },
+  {
+   "default": "1",
+   "description": "On submission of the stock transaction, system will auto create the Serial and Batch Bundle based on the Serial No / Batch fields.",
+   "fieldname": "use_serial_batch_fields",
+   "fieldtype": "Check",
+   "label": "Use Serial / Batch Fields"
+  },
+  {
+   "default": "1",
+   "description": "If enabled, do not update serial / batch values in the stock transactions on creation of auto Serial \n / Batch Bundle. ",
+   "fieldname": "do_not_update_serial_batch_on_creation_of_auto_bundle",
+   "fieldtype": "Check",
+   "label": "Do Not Update Serial / Batch on Creation of Auto Bundle"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, the item rate won't adjust to the valuation rate during internal transfers, but accounting will still use the valuation rate.",
+   "fieldname": "allow_internal_transfer_at_arms_length_price",
+   "fieldtype": "Check",
+   "label": "Allow Internal Transfers at Arm's Length Price"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.valuation_method === \"Moving Average\"",
+   "description": "If enabled, the system will use the moving average valuation method to calculate the valuation rate for the batched items and will not consider the individual batch-wise incoming rate.",
+   "fieldname": "do_not_use_batchwise_valuation",
+   "fieldtype": "Check",
+   "label": "Do Not Use Batch-wise Valuation"
+  },
+  {
+   "description": "The percentage you are allowed to pick more items in the pick list than the ordered quantity.",
+   "fieldname": "over_picking_allowance",
+   "fieldtype": "Percent",
+   "label": "Over Picking Allowance"
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_existing_serial_no",
+   "fieldtype": "Check",
+   "label": "Allow existing Serial No to be Manufactured/Received again"
+  },
+  {
+   "default": "0",
+   "description": "Upon submission of the Sales Order, Work Order, or Production Plan, the system will automatically reserve the stock.",
+   "fieldname": "auto_reserve_stock",
+   "fieldtype": "Check",
+   "label": "Auto Reserve Stock"
   }
  ],
  "icon": "icon-cog",
@@ -427,7 +482,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2024-01-30 14:03:52.143457",
+ "modified": "2024-12-10 17:52:36.030456",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Stock Settings",
@@ -448,7 +503,7 @@
   }
  ],
  "quick_entry": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "ASC",
  "states": [],
  "track_changes": 1

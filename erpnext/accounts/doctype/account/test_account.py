@@ -1,11 +1,9 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
-
-
 import unittest
 
 import frappe
-from frappe.test_runner import make_test_records
+from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
 from erpnext.accounts.doctype.account.account import (
@@ -15,10 +13,10 @@ from erpnext.accounts.doctype.account.account import (
 )
 from erpnext.stock import get_company_default_inventory_account, get_warehouse_account
 
-test_dependencies = ["Company"]
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Company"]
 
 
-class TestAccount(unittest.TestCase):
+class TestAccount(IntegrationTestCase):
 	def test_rename_account(self):
 		if not frappe.db.exists("Account", "1210 - Debtors - _TC"):
 			acc = frappe.new_doc("Account")
@@ -203,8 +201,6 @@ class TestAccount(unittest.TestCase):
 		In a parent->child company setup, child should inherit parent account currency if explicitly specified.
 		"""
 
-		make_test_records("Company")
-
 		frappe.local.flags.pop("ignore_root_company_validation", None)
 
 		def create_bank_account():
@@ -261,28 +257,20 @@ class TestAccount(unittest.TestCase):
 		acc.insert()
 
 		self.assertTrue(
-			frappe.db.exists(
-				"Account", {"account_name": "Test Group Account", "company": "_Test Company 4"}
-			)
+			frappe.db.exists("Account", {"account_name": "Test Group Account", "company": "_Test Company 4"})
 		)
 		self.assertTrue(
-			frappe.db.exists(
-				"Account", {"account_name": "Test Group Account", "company": "_Test Company 5"}
-			)
+			frappe.db.exists("Account", {"account_name": "Test Group Account", "company": "_Test Company 5"})
 		)
 
 		# Try renaming child company account
 		acc_tc_5 = frappe.db.get_value(
 			"Account", {"account_name": "Test Group Account", "company": "_Test Company 5"}
 		)
-		self.assertRaises(
-			frappe.ValidationError, update_account_number, acc_tc_5, "Test Modified Account"
-		)
+		self.assertRaises(frappe.ValidationError, update_account_number, acc_tc_5, "Test Modified Account")
 
 		# Rename child company account with allow_account_creation_against_child_company enabled
-		frappe.db.set_value(
-			"Company", "_Test Company 5", "allow_account_creation_against_child_company", 1
-		)
+		frappe.db.set_value("Company", "_Test Company 5", "allow_account_creation_against_child_company", 1)
 
 		update_account_number(acc_tc_5, "Test Modified Account")
 		self.assertTrue(
@@ -291,9 +279,7 @@ class TestAccount(unittest.TestCase):
 			)
 		)
 
-		frappe.db.set_value(
-			"Company", "_Test Company 5", "allow_account_creation_against_child_company", 0
-		)
+		frappe.db.set_value("Company", "_Test Company 5", "allow_account_creation_against_child_company", 0)
 
 		to_delete = [
 			"Test Group Account - _TC3",
@@ -318,9 +304,7 @@ class TestAccount(unittest.TestCase):
 		self.assertEqual(acc.account_currency, "INR")
 
 		# Make a JV against this account
-		make_journal_entry(
-			"Test Currency Account - _TC", "Miscellaneous Expenses - _TC", 100, submit=True
-		)
+		make_journal_entry("Test Currency Account - _TC", "Miscellaneous Expenses - _TC", 100, submit=True)
 
 		acc.account_currency = "USD"
 		self.assertRaises(frappe.ValidationError, acc.save)
@@ -340,7 +324,7 @@ class TestAccount(unittest.TestCase):
 
 
 def _make_test_records(verbose=None):
-	from frappe.test_runner import make_test_objects
+	from frappe.tests.utils import make_test_objects
 
 	accounts = [
 		# [account_name, parent_account, is_group]

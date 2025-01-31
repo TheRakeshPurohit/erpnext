@@ -1,22 +1,13 @@
-import json
-
 import frappe
-from frappe.test_runner import make_test_records
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase
 
 from erpnext.stock.get_item_details import get_item_details
 
-test_ignore = ["BOM"]
-test_dependencies = ["Customer", "Supplier", "Item", "Price List", "Item Price"]
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Customer", "Supplier", "Item", "Price List", "Item Price"]
 
 
-class TestGetItemDetail(FrappeTestCase):
-	def setUp(self):
-		make_test_records("Price List")
-		super().setUp()
-
+class TestGetItemDetail(IntegrationTestCase):
 	def test_get_item_detail_purchase_order(self):
-
 		args = frappe._dict(
 			{
 				"item_code": "_Test Item",
@@ -29,7 +20,6 @@ class TestGetItemDetail(FrappeTestCase):
 				"name": None,
 				"supplier": "_Test Supplier",
 				"transaction_date": None,
-				"conversion_rate": 1.0,
 				"price_list": "_Test Buying Price List",
 				"is_subcontracted": 0,
 				"ignore_pricing_rule": 1,

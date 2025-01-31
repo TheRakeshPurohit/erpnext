@@ -1,9 +1,9 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
-
 import unittest
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils import now
 
 from erpnext.assets.doctype.asset.test_asset import create_asset_data
@@ -11,7 +11,7 @@ from erpnext.setup.doctype.employee.test_employee import make_employee
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 
 
-class TestAssetMovement(unittest.TestCase):
+class TestAssetMovement(IntegrationTestCase):
 	def setUp(self):
 		frappe.db.set_value(
 			"Company", "_Test Company", "capital_work_in_progress_account", "CWIP Account - _TC"
@@ -20,9 +20,7 @@ class TestAssetMovement(unittest.TestCase):
 		make_location()
 
 	def test_movement(self):
-		pr = make_purchase_receipt(
-			item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location"
-		)
+		pr = make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location")
 
 		asset_name = frappe.db.get_value("Asset", {"purchase_receipt": pr.name}, "name")
 		asset = frappe.get_doc("Asset", asset_name)
@@ -51,7 +49,11 @@ class TestAssetMovement(unittest.TestCase):
 			purpose="Transfer",
 			company=asset.company,
 			assets=[
-				{"asset": asset.name, "source_location": "Test Location", "target_location": "Test Location 2"}
+				{
+					"asset": asset.name,
+					"source_location": "Test Location",
+					"target_location": "Test Location 2",
+				}
 			],
 			reference_doctype="Purchase Receipt",
 			reference_name=pr.name,
@@ -62,7 +64,11 @@ class TestAssetMovement(unittest.TestCase):
 			purpose="Transfer",
 			company=asset.company,
 			assets=[
-				{"asset": asset.name, "source_location": "Test Location 2", "target_location": "Test Location"}
+				{
+					"asset": asset.name,
+					"source_location": "Test Location 2",
+					"target_location": "Test Location",
+				}
 			],
 			reference_doctype="Purchase Receipt",
 			reference_name=pr.name,
@@ -97,9 +103,7 @@ class TestAssetMovement(unittest.TestCase):
 		self.assertEqual(frappe.db.get_value("Asset", asset.name, "location"), "Test Location")
 
 	def test_last_movement_cancellation(self):
-		pr = make_purchase_receipt(
-			item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location"
-		)
+		pr = make_purchase_receipt(item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location")
 
 		asset_name = frappe.db.get_value("Asset", {"purchase_receipt": pr.name}, "name")
 		asset = frappe.get_doc("Asset", asset_name)
@@ -129,7 +133,11 @@ class TestAssetMovement(unittest.TestCase):
 			purpose="Transfer",
 			company=asset.company,
 			assets=[
-				{"asset": asset.name, "source_location": "Test Location", "target_location": "Test Location 2"}
+				{
+					"asset": asset.name,
+					"source_location": "Test Location",
+					"target_location": "Test Location 2",
+				}
 			],
 			reference_doctype="Purchase Receipt",
 			reference_name=pr.name,
@@ -167,6 +175,4 @@ def create_asset_movement(**args):
 def make_location():
 	for location in ["Pune", "Mumbai", "Nagpur"]:
 		if not frappe.db.exists("Location", location):
-			frappe.get_doc({"doctype": "Location", "location_name": location}).insert(
-				ignore_permissions=True
-			)
+			frappe.get_doc({"doctype": "Location", "location_name": location}).insert(ignore_permissions=True)

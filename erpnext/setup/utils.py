@@ -4,10 +4,14 @@
 import frappe
 from frappe import _
 from frappe.utils import add_days, flt, get_datetime_str, nowdate
-from frappe.utils.data import now_datetime
-from frappe.utils.nestedset import get_ancestors_of, get_root_of  # noqa
+from frappe.utils.data import getdate, now_datetime
+from frappe.utils.nestedset import get_root_of
 
 from erpnext import get_default_company
+
+PEGGED_CURRENCIES = {
+	"USD": {"AED": 3.6725},  # AED is pegged to USD at a rate of 3.6725 since 1997
+}
 
 
 def before_tests():
@@ -36,13 +40,19 @@ def before_tests():
 			}
 		)
 
-	frappe.db.sql("delete from `tabItem Price`")
-
 	_enable_all_roles_for_admin()
 
 	set_defaults_for_tests()
 
 	frappe.db.commit()
+
+
+def get_pegged_rate(from_currency: str, to_currency: str, transaction_date) -> float | None:
+	if rate := PEGGED_CURRENCIES.get(from_currency, {}).get(to_currency):
+		return rate
+	elif rate := PEGGED_CURRENCIES.get(to_currency, {}).get(from_currency):
+		return 1 / rate
+	return None
 
 
 @frappe.whitelist()
@@ -55,6 +65,10 @@ def get_exchange_rate(from_currency, to_currency, transaction_date=None, args=No
 
 	if not transaction_date:
 		transaction_date = nowdate()
+
+	if rate := get_pegged_rate(from_currency, to_currency, transaction_date):
+		return rate
+
 	currency_settings = frappe.get_doc("Accounts Settings").as_dict()
 	allow_stale_rates = currency_settings.get("allow_stale")
 
@@ -81,14 +95,12 @@ def get_exchange_rate(from_currency, to_currency, transaction_date=None, args=No
 	if entries:
 		return flt(entries[0].exchange_rate)
 
-	if frappe.get_cached_value(
-		"Currency Exchange Settings", "Currency Exchange Settings", "disabled"
-	):
+	if frappe.get_cached_value("Currency Exchange Settings", "Currency Exchange Settings", "disabled"):
 		return 0.00
 
 	try:
 		cache = frappe.cache()
-		key = "currency_exchange_rate_{0}:{1}:{2}".format(transaction_date, from_currency, to_currency)
+		key = f"currency_exchange_rate_{transaction_date}:{from_currency}:{to_currency}"
 		value = cache.get(key)
 
 		if not value:
@@ -97,8 +109,8 @@ def get_exchange_rate(from_currency, to_currency, transaction_date=None, args=No
 			settings = frappe.get_cached_doc("Currency Exchange Settings")
 			req_params = {
 				"transaction_date": transaction_date,
-				"from_currency": from_currency,
-				"to_currency": to_currency,
+				"from_currency": from_currency if from_currency != "AED" else "USD",
+				"to_currency": to_currency if to_currency != "AED" else "USD",
 			}
 			params = {}
 			for row in settings.req_params:
@@ -110,6 +122,14 @@ def get_exchange_rate(from_currency, to_currency, transaction_date=None, args=No
 			for res_key in settings.result_key:
 				value = value[format_ces_api(str(res_key.key), req_params)]
 			cache.setex(name=key, time=21600, value=flt(value))
+
+		# Support AED conversion through pegged USD
+		value = flt(value)
+		if to_currency == "AED":
+			value *= 3.6725
+		if from_currency == "AED":
+			value /= 3.6725
+
 		return flt(value)
 	except Exception:
 		frappe.log_error("Unable to fetch exchange rate")

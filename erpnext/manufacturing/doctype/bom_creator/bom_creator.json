@@ -19,6 +19,8 @@
   "qty",
   "project",
   "uom",
+  "section_break_xvld",
+  "routing",
   "raw_materials_tab",
   "currency_detail",
   "rm_cost_as_per",
@@ -66,7 +68,7 @@
    "fieldname": "rm_cost_as_per",
    "fieldtype": "Select",
    "label": "Rate Of Materials Based On",
-   "options": "Valuation Rate\nLast Purchase Rate\nPrice List\nManual",
+   "options": "Valuation Rate\nLast Purchase Rate\nPrice List",
    "reqd": 1
   },
   {
@@ -278,8 +280,20 @@
    "fieldtype": "Text",
    "label": "Error Log",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_break_xvld",
+   "fieldtype": "Section Break",
+   "label": "Operations Routing"
+  },
+  {
+   "fieldname": "routing",
+   "fieldtype": "Link",
+   "label": "Routing",
+   "options": "Routing"
   }
  ],
+ "hide_toolbar": 1,
  "icon": "fa fa-sitemap",
  "is_submittable": 1,
  "links": [
@@ -288,7 +302,7 @@
    "link_fieldname": "bom_creator"
   }
  ],
- "modified": "2023-08-07 15:45:06.176313",
+ "modified": "2024-11-25 16:41:03.047835",
  "modified_by": "Administrator",
  "module": "Manufacturing",
  "name": "BOM Creator",
@@ -323,7 +337,7 @@
   }
  ],
  "show_name_in_global_search": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1

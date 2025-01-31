@@ -70,7 +70,7 @@ class POSClosingEntry(StatusUpdater):
 		for key, value in pos_occurences.items():
 			if len(value) > 1:
 				error_list.append(
-					_("{} is added multiple times on rows: {}".format(frappe.bold(key), frappe.bold(value)))
+					_("{0} is added multiple times on rows: {1}").format(frappe.bold(key), frappe.bold(value))
 				)
 
 		if error_list:
@@ -87,19 +87,15 @@ class POSClosingEntry(StatusUpdater):
 				as_dict=1,
 			)[0]
 			if pos_invoice.consolidated_invoice:
-				invalid_row.setdefault("msg", []).append(
-					_("POS Invoice is {}").format(frappe.bold("already consolidated"))
-				)
+				invalid_row.setdefault("msg", []).append(_("POS Invoice is already consolidated"))
 				invalid_rows.append(invalid_row)
 				continue
 			if pos_invoice.pos_profile != self.pos_profile:
 				invalid_row.setdefault("msg", []).append(
-					_("POS Profile doesn't matches {}").format(frappe.bold(self.pos_profile))
+					_("POS Profile doesn't match {}").format(frappe.bold(self.pos_profile))
 				)
 			if pos_invoice.docstatus != 1:
-				invalid_row.setdefault("msg", []).append(
-					_("POS Invoice is not {}").format(frappe.bold("submitted"))
-				)
+				invalid_row.setdefault("msg", []).append(_("POS Invoice is not submitted"))
 			if pos_invoice.owner != self.user:
 				invalid_row.setdefault("msg", []).append(
 					_("POS Invoice isn't created by user {}").format(frappe.bold(self.owner))
@@ -165,9 +161,7 @@ def get_pos_invoices(start, end, pos_profile, user):
 		as_dict=1,
 	)
 
-	data = list(
-		filter(lambda d: get_datetime(start) <= get_datetime(d.timestamp) <= get_datetime(end), data)
-	)
+	data = list(filter(lambda d: get_datetime(start) <= get_datetime(d.timestamp) <= get_datetime(end), data))
 	# need to get taxes and payments so can't avoid get_doc
 	data = [frappe.get_doc("POS Invoice", d.name).as_dict() for d in data]
 
@@ -238,7 +232,11 @@ def make_closing_entry_from_opening(opening_entry):
 			else:
 				payments.append(
 					frappe._dict(
-						{"mode_of_payment": p.mode_of_payment, "opening_amount": 0, "expected_amount": p.amount}
+						{
+							"mode_of_payment": p.mode_of_payment,
+							"opening_amount": 0,
+							"expected_amount": p.amount,
+						}
 					)
 				)
 

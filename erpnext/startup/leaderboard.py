@@ -1,5 +1,6 @@
 import frappe
-from frappe.utils.deprecations import deprecated
+
+from erpnext.deprecation_dumpster import deprecated
 
 
 def get_leaderboards():
@@ -93,7 +94,7 @@ def get_all_items(date_range, company, field, limit=None):
 		select_field = "sum(actual_qty)" if field == "available_stock_qty" else "sum(stock_value)"
 		results = frappe.db.get_all(
 			"Bin",
-			fields=["item_code as name", "{0} as value".format(select_field)],
+			fields=["item_code as name", f"{select_field} as value"],
 			group_by="item_code",
 			order_by="value desc",
 			limit=limit,
@@ -218,15 +219,13 @@ def get_all_sales_person(date_range, company, field=None, limit=0):
 	)
 
 
-@deprecated
+@deprecated(f"{__name__}.get_date_condition", "unknown", "v16", "No known instructions.")
 def get_date_condition(date_range, field):
 	date_condition = ""
 	if date_range:
 		date_range = frappe.parse_json(date_range)
 		from_date, to_date = date_range
-		date_condition = "and {0} between {1} and {2}".format(
-			field, frappe.db.escape(from_date), frappe.db.escape(to_date)
-		)
+		date_condition = f"and {field} between {frappe.db.escape(from_date)} and {frappe.db.escape(to_date)}"
 	return date_condition
 
 

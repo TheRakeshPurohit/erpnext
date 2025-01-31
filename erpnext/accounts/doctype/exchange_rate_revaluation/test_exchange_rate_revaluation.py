@@ -1,24 +1,17 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
-import unittest
 
 import frappe
-from frappe import qb
-from frappe.tests.utils import FrappeTestCase, change_settings
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, flt, today
 
-from erpnext import get_default_cost_center
 from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
-from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_payment_entry
-from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
-from erpnext.accounts.party import get_party_account
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
-from erpnext.stock.doctype.item.test_item import create_item
 
 
-class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
+class TestExchangeRateRevaluation(AccountsTestMixin, IntegrationTestCase):
 	def setUp(self):
 		self.create_company()
 		self.create_usd_receivable_account()
@@ -42,7 +35,7 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 		company_doc.unrealized_exchange_gain_loss_account = company_doc.exchange_gain_loss_account
 		company_doc.save()
 
-	@change_settings(
+	@IntegrationTestCase.change_settings(
 		"Accounts Settings",
 		{"allow_multi_currency_invoices_against_single_party_account": 1, "allow_stale": 0},
 	)
@@ -73,9 +66,7 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 		err.extend("accounts", accounts)
 		row = err.accounts[0]
 		row.new_exchange_rate = 85
-		row.new_balance_in_base_currency = flt(
-			row.new_exchange_rate * flt(row.balance_in_account_currency)
-		)
+		row.new_balance_in_base_currency = flt(row.new_exchange_rate * flt(row.balance_in_account_currency))
 		row.gain_loss = row.new_balance_in_base_currency - flt(row.balance_in_base_currency)
 		err.set_total_gain_loss()
 		err = err.save().submit()
@@ -97,7 +88,7 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 		)[0]
 		self.assertEqual(acc_balance.balance, 8500.0)
 
-	@change_settings(
+	@IntegrationTestCase.change_settings(
 		"Accounts Settings",
 		{"allow_multi_currency_invoices_against_single_party_account": 1, "allow_stale": 0},
 	)
@@ -127,9 +118,9 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 		pe.save().submit()
 
 		# Cancel the auto created gain/loss JE to simulate balance only in base currency
-		je = frappe.db.get_all(
-			"Journal Entry Account", filters={"reference_name": si.name}, pluck="parent"
-		)[0]
+		je = frappe.db.get_all("Journal Entry Account", filters={"reference_name": si.name}, pluck="parent")[
+			0
+		]
 		frappe.get_doc("Journal Entry", je).cancel()
 
 		err = frappe.new_doc("Exchange Rate Revaluation")
@@ -167,7 +158,7 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 		self.assertEqual(acc_balance.balance, 0.0)
 		self.assertEqual(acc_balance.balance_in_account_currency, 0.0)
 
-	@change_settings(
+	@IntegrationTestCase.change_settings(
 		"Accounts Settings",
 		{"allow_multi_currency_invoices_against_single_party_account": 1, "allow_stale": 0},
 	)
@@ -197,7 +188,7 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 
 		pe = get_payment_entry(si.doctype, si.name)
 		pe.paid_amount = 95
-		pe.source_exchange_rate = 84.211
+		pe.source_exchange_rate = 84.2105
 		pe.received_amount = 8000
 		pe.references = []
 		pe.save().submit()
@@ -235,10 +226,10 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 			self.assertEqual(flt(acc.debit, precision), 0.0)
 			self.assertEqual(flt(acc.credit, precision), 0.0)
 
-		row = [x for x in je.accounts if x.account == self.debtors_usd][0]
+		row = next(x for x in je.accounts if x.account == self.debtors_usd)
 		self.assertEqual(flt(row.credit_in_account_currency, precision), 5.0)  # in USD
-		row = [x for x in je.accounts if x.account != self.debtors_usd][0]
-		self.assertEqual(flt(row.debit_in_account_currency, precision), 421.06)  # in INR
+		row = next(x for x in je.accounts if x.account != self.debtors_usd)
+		self.assertEqual(flt(row.debit_in_account_currency, precision), 421.05)  # in INR
 
 		# total_debit and total_credit will be 0.0, as JV is posting only to account currency fields
 		self.assertEqual(flt(je.total_debit, precision), 0.0)
@@ -256,7 +247,7 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 		self.assertEqual(flt(acc_balance.balance, precision), 0.0)
 		self.assertEqual(flt(acc_balance.balance_in_account_currency, precision), 0.0)
 
-	@change_settings(
+	@IntegrationTestCase.change_settings(
 		"Accounts Settings",
 		{"allow_multi_currency_invoices_against_single_party_account": 1, "allow_stale": 0},
 	)
@@ -294,5 +285,5 @@ class TestExchangeRateRevaluation(AccountsTestMixin, FrappeTestCase):
 			"new_balance_in_account_currency": 100.0,
 		}
 
-		for key, val in expected_data.items():
+		for key, _val in expected_data.items():
 			self.assertEqual(expected_data.get(key), account_details.get(key))

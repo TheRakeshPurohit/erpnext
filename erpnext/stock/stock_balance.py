@@ -15,9 +15,7 @@ def repost(only_actual=False, allow_negative_stock=False, allow_zero_rate=False,
 	frappe.db.auto_commit_on_many_writes = 1
 
 	if allow_negative_stock:
-		existing_allow_negative_stock = frappe.db.get_single_value(
-			"Stock Settings", "allow_negative_stock"
-		)
+		existing_allow_negative_stock = frappe.db.get_single_value("Stock Settings", "allow_negative_stock")
 		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
 
 	item_warehouses = frappe.db.sql(
@@ -37,9 +35,7 @@ def repost(only_actual=False, allow_negative_stock=False, allow_zero_rate=False,
 			frappe.db.rollback()
 
 	if allow_negative_stock:
-		frappe.db.set_single_value(
-			"Stock Settings", "allow_negative_stock", existing_allow_negative_stock
-		)
+		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", existing_allow_negative_stock)
 	frappe.db.auto_commit_on_many_writes = 0
 
 
@@ -51,7 +47,6 @@ def repost_stock(
 	only_bin=False,
 	allow_negative_stock=False,
 ):
-
 	if not only_bin:
 		repost_actual_qty(item_code, warehouse, allow_zero_rate, allow_negative_stock)
 
@@ -85,7 +80,7 @@ def get_balance_qty_from_sle(item_code, warehouse):
 	balance_qty = frappe.db.sql(
 		"""select qty_after_transaction from `tabStock Ledger Entry`
 		where item_code=%s and warehouse=%s and is_cancelled=0
-		order by posting_date desc, posting_time desc, creation desc
+		order by posting_datetime desc, creation desc
 		limit 1""",
 		(item_code, warehouse),
 	)

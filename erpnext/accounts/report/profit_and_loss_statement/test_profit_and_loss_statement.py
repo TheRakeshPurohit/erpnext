@@ -2,8 +2,9 @@
 # MIT License. See license.txt
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, getdate, today
+from frappe.desk.query_report import export_query
+from frappe.tests import IntegrationTestCase
+from frappe.utils import getdate, today
 
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.accounts.report.financial_statements import get_period_list
@@ -11,7 +12,7 @@ from erpnext.accounts.report.profit_and_loss_statement.profit_and_loss_statement
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 
 
-class TestProfitAndLossStatement(AccountsTestMixin, FrappeTestCase):
+class TestProfitAndLossStatement(AccountsTestMixin, IntegrationTestCase):
 	def setUp(self):
 		self.create_company()
 		self.create_customer()
@@ -61,7 +62,7 @@ class TestProfitAndLossStatement(AccountsTestMixin, FrappeTestCase):
 		)
 
 	def test_profit_and_loss_output_and_summary(self):
-		si = self.create_sales_invoice(qty=1, rate=150)
+		self.create_sales_invoice(qty=1, rate=150)
 
 		filters = self.get_report_filters()
 		period_list = get_period_list(
@@ -75,9 +76,7 @@ class TestProfitAndLossStatement(AccountsTestMixin, FrappeTestCase):
 		)
 
 		result = execute(filters)[1]
-		current_period = [x for x in period_list if x.from_date <= getdate() and x.to_date >= getdate()][
-			0
-		]
+		current_period = next(x for x in period_list if x.from_date <= getdate() and x.to_date >= getdate())
 		current_period_key = current_period.key
 		without_current_period = [x for x in period_list if x.key != current_period.key]
 		# all period except current period(whence invoice was posted), should be '0'
@@ -92,3 +91,21 @@ class TestProfitAndLossStatement(AccountsTestMixin, FrappeTestCase):
 				with self.subTest(current_period_key=current_period_key):
 					self.assertEqual(acc[current_period_key], 150)
 					self.assertEqual(acc["total"], 150)
+
+	def test_p_and_l_export(self):
+		self.create_sales_invoice(qty=1, rate=150)
+
+		filters = self.get_report_filters()
+		frappe.local.form_dict = frappe._dict(
+			{
+				"report_name": "Profit and Loss Statement",
+				"file_format_type": "CSV",
+				"filters": filters,
+				"visible_idx": [0, 1, 2, 3, 4, 5, 6],
+			}
+		)
+		export_query()
+		contents = frappe.response["filecontent"].decode()
+		sales_account = frappe.db.get_value("Company", self.company, "default_income_account")
+
+		self.assertIn(sales_account, contents)

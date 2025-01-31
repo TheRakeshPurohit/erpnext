@@ -6,6 +6,7 @@ import frappe
 from frappe import _, bold
 from frappe.query_builder.functions import IfNull, Sum
 from frappe.utils import cint, flt, get_link_to_form, getdate, nowdate
+from frappe.utils.nestedset import get_descendants_of
 
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import validate_loyalty_points
 from erpnext.accounts.doctype.payment_request.payment_request import make_payment_request
@@ -15,6 +16,7 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import (
 	update_multi_mode_option,
 )
 from erpnext.accounts.party import get_due_date, get_party_account
+from erpnext.controllers.queries import item_query as _item_query
 from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 
 
@@ -30,12 +32,8 @@ class POSInvoice(SalesInvoice):
 		from erpnext.accounts.doctype.payment_schedule.payment_schedule import PaymentSchedule
 		from erpnext.accounts.doctype.pos_invoice_item.pos_invoice_item import POSInvoiceItem
 		from erpnext.accounts.doctype.pricing_rule_detail.pricing_rule_detail import PricingRuleDetail
-		from erpnext.accounts.doctype.sales_invoice_advance.sales_invoice_advance import (
-			SalesInvoiceAdvance,
-		)
-		from erpnext.accounts.doctype.sales_invoice_payment.sales_invoice_payment import (
-			SalesInvoicePayment,
-		)
+		from erpnext.accounts.doctype.sales_invoice_advance.sales_invoice_advance import SalesInvoiceAdvance
+		from erpnext.accounts.doctype.sales_invoice_payment.sales_invoice_payment import SalesInvoicePayment
 		from erpnext.accounts.doctype.sales_invoice_timesheet.sales_invoice_timesheet import (
 			SalesInvoiceTimesheet,
 		)
@@ -47,7 +45,7 @@ class POSInvoice(SalesInvoice):
 
 		account_for_change_amount: DF.Link | None
 		additional_discount_percentage: DF.Float
-		address_display: DF.SmallText | None
+		address_display: DF.TextEditor | None
 		advances: DF.Table[SalesInvoiceAdvance]
 		against_income_account: DF.SmallText | None
 		allocate_advances_automatically: DF.Check
@@ -66,13 +64,13 @@ class POSInvoice(SalesInvoice):
 		base_total: DF.Currency
 		base_total_taxes_and_charges: DF.Currency
 		base_write_off_amount: DF.Currency
-		campaign: DF.Link | None
 		cash_bank_account: DF.Link | None
 		change_amount: DF.Currency
 		commission_rate: DF.Float
 		company: DF.Link
 		company_address: DF.Link | None
-		company_address_display: DF.SmallText | None
+		company_address_display: DF.TextEditor | None
+		company_contact_person: DF.Link | None
 		consolidated_invoice: DF.Link | None
 		contact_display: DF.SmallText | None
 		contact_email: DF.Data | None
@@ -109,7 +107,7 @@ class POSInvoice(SalesInvoice):
 		loyalty_redemption_cost_center: DF.Link | None
 		naming_series: DF.Literal["ACC-PSINV-.YYYY.-"]
 		net_total: DF.Currency
-		other_charges_calculation: DF.LongText | None
+		other_charges_calculation: DF.TextEditor | None
 		outstanding_amount: DF.Currency
 		packed_items: DF.Table[PackedItem]
 		paid_amount: DF.Currency
@@ -138,10 +136,9 @@ class POSInvoice(SalesInvoice):
 		selling_price_list: DF.Link
 		set_posting_time: DF.Check
 		set_warehouse: DF.Link | None
-		shipping_address: DF.SmallText | None
+		shipping_address: DF.TextEditor | None
 		shipping_address_name: DF.Link | None
 		shipping_rule: DF.Link | None
-		source: DF.Link | None
 		status: DF.Literal[
 			"",
 			"Draft",
@@ -164,7 +161,6 @@ class POSInvoice(SalesInvoice):
 		terms: DF.TextEditor | None
 		territory: DF.Link | None
 		timesheets: DF.Table[SalesInvoiceTimesheet]
-		title: DF.Data | None
 		to_date: DF.Date | None
 		total: DF.Currency
 		total_advance: DF.Currency
@@ -176,6 +172,9 @@ class POSInvoice(SalesInvoice):
 		update_billed_amount_in_delivery_note: DF.Check
 		update_billed_amount_in_sales_order: DF.Check
 		update_stock: DF.Check
+		utm_campaign: DF.Link | None
+		utm_medium: DF.Link | None
+		utm_source: DF.Link | None
 		write_off_account: DF.Link | None
 		write_off_amount: DF.Currency
 		write_off_cost_center: DF.Link | None
@@ -183,12 +182,12 @@ class POSInvoice(SalesInvoice):
 	# end: auto-generated types
 
 	def __init__(self, *args, **kwargs):
-		super(POSInvoice, self).__init__(*args, **kwargs)
+		super().__init__(*args, **kwargs)
 
 	def validate(self):
 		if not cint(self.is_pos):
 			frappe.throw(
-				_("POS Invoice should have {} field checked.").format(frappe.bold("Include Payment"))
+				_("POS Invoice should have the field {0} checked.").format(frappe.bold(_("Include Payment")))
 			)
 
 		# run on validate method of selling controller
@@ -228,12 +227,16 @@ class POSInvoice(SalesInvoice):
 			self.apply_loyalty_points()
 		self.check_phone_payments()
 		self.set_status(update=True)
-		self.submit_serial_batch_bundle()
+		self.make_bundle_for_sales_purchase_return()
+		for table_name in ["items", "packed_items"]:
+			self.make_bundle_using_old_serial_batch_fields(table_name)
+			self.submit_serial_batch_bundle(table_name)
 
 		if self.coupon_code:
 			from erpnext.accounts.doctype.pricing_rule.utils import update_coupon_code_count
 
 			update_coupon_code_count(self.coupon_code, "used")
+		self.clear_unallocated_mode_of_payments()
 
 	def before_cancel(self):
 		if (
@@ -272,6 +275,12 @@ class POSInvoice(SalesInvoice):
 
 		self.delink_serial_and_batch_bundle()
 
+	def clear_unallocated_mode_of_payments(self):
+		self.set("payments", self.get("payments", {"amount": ["not in", [0, None, ""]]}))
+
+		sip = frappe.qb.DocType("Sales Invoice Payment")
+		frappe.qb.from_(sip).delete().where(sip.parent == self.name).where(sip.amount == 0).run()
+
 	def delink_serial_and_batch_bundle(self):
 		for row in self.items:
 			if row.serial_and_batch_bundle:
@@ -282,10 +291,11 @@ class POSInvoice(SalesInvoice):
 						{"is_cancelled": 1, "voucher_no": ""},
 					)
 
+				frappe.get_doc("Serial and Batch Bundle", row.serial_and_batch_bundle).cancel()
 				row.db_set("serial_and_batch_bundle", None)
 
-	def submit_serial_batch_bundle(self):
-		for item in self.items:
+	def submit_serial_batch_bundle(self, table_name):
+		for item in self.get(table_name):
 			if item.serial_and_batch_bundle:
 				doc = frappe.get_doc("Serial and Batch Bundle", item.serial_and_batch_bundle)
 
@@ -308,7 +318,9 @@ class POSInvoice(SalesInvoice):
 				)
 
 				if paid_amt and pay.amount != paid_amt:
-					return frappe.throw(_("Payment related to {0} is not completed").format(pay.mode_of_payment))
+					return frappe.throw(
+						_("Payment related to {0} is not completed").format(pay.mode_of_payment)
+					)
 
 	def validate_stock_availablility(self):
 		if self.is_return:
@@ -328,7 +340,7 @@ class POSInvoice(SalesInvoice):
 
 				available_stock, is_stock_item = get_stock_availability(d.item_code, d.warehouse)
 
-				item_code, warehouse, qty = (
+				item_code, warehouse, _qty = (
 					frappe.bold(d.item_code),
 					frappe.bold(d.warehouse),
 					frappe.bold(d.qty),
@@ -352,10 +364,16 @@ class POSInvoice(SalesInvoice):
 		error_msg = []
 		for d in self.get("items"):
 			error_msg = ""
-			if d.get("has_serial_no") and not d.serial_and_batch_bundle:
+			if d.get("has_serial_no") and (
+				(not d.use_serial_batch_fields and not d.serial_and_batch_bundle)
+				or (d.use_serial_batch_fields and not d.serial_no)
+			):
 				error_msg = f"Row #{d.idx}: Please select Serial No. for item {bold(d.item_code)}"
 
-			elif d.get("has_batch_no") and not d.serial_and_batch_bundle:
+			elif d.get("has_batch_no") and (
+				(not d.use_serial_batch_fields and not d.serial_and_batch_bundle)
+				or (d.use_serial_batch_fields and not d.batch_no)
+			):
 				error_msg = f"Row #{d.idx}: Please select Batch No. for item {bold(d.item_code)}"
 
 		if error_msg:
@@ -408,8 +426,7 @@ class POSInvoice(SalesInvoice):
 		if (
 			self.change_amount
 			and self.account_for_change_amount
-			and frappe.get_cached_value("Account", self.account_for_change_amount, "company")
-			!= self.company
+			and frappe.get_cached_value("Account", self.account_for_change_amount, "company") != self.company
 		):
 			frappe.throw(
 				_("The selected change account {} doesn't belongs to Company {}.").format(
@@ -438,8 +455,9 @@ class POSInvoice(SalesInvoice):
 			if self.is_return and entry.amount > 0:
 				frappe.throw(_("Row #{0} (Payment Table): Amount must be negative").format(entry.idx))
 
-		if self.is_return:
+		if self.is_return and self.docstatus != 0:
 			invoice_total = self.rounded_total or self.grand_total
+			total_amount_in_payments = flt(total_amount_in_payments, self.precision("grand_total"))
 			if total_amount_in_payments and total_amount_in_payments < invoice_total:
 				frappe.throw(_("Total payments amount can't be greater than {}").format(-invoice_total))
 
@@ -518,7 +536,11 @@ class POSInvoice(SalesInvoice):
 
 	def set_pos_fields(self, for_validate=False):
 		"""Set retail related fields from POS Profiles"""
-		from erpnext.stock.get_item_details import get_pos_profile, get_pos_profile_item_details
+		from erpnext.stock.get_item_details import (
+			ItemDetailsCtx,
+			get_pos_profile,
+			get_pos_profile_item_details_,
+		)
 
 		if not self.pos_profile:
 			pos_profile = get_pos_profile(self.company) or {}
@@ -587,8 +609,8 @@ class POSInvoice(SalesInvoice):
 			# set pos values in items
 			for item in self.get("items"):
 				if item.get("item_code"):
-					profile_details = get_pos_profile_item_details(
-						profile.get("company"), frappe._dict(item.as_dict()), profile
+					profile_details = get_pos_profile_item_details_(
+						ItemDetailsCtx(item.as_dict()), profile.get("company"), profile
 					)
 					for fname, val in profile_details.items():
 						if (not for_validate) or (for_validate and not item.get(fname)):
@@ -630,7 +652,9 @@ class POSInvoice(SalesInvoice):
 		if profile:
 			return {
 				"print_format": print_format,
-				"campaign": profile.get("campaign"),
+				"utm_source": profile.get("utm_source"),
+				"utm_campaign": profile.get("utm_campaign"),
+				"utm_medium": profile.get("utm_medium"),
 				"allow_print_before_pay": profile.get("allow_print_before_pay"),
 			}
 
@@ -825,3 +849,30 @@ def add_return_modes(doc, pos_profile):
 		]:
 			payment_mode = get_mode_of_payment_info(mode_of_payment, doc.company)
 			append_payment(payment_mode[0])
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def item_query(doctype, txt, searchfield, start, page_len, filters, as_dict=False):
+	if pos_profile := filters.get("pos_profile")[1]:
+		pos_profile = frappe.get_cached_doc("POS Profile", pos_profile)
+		if item_groups := get_item_group(pos_profile):
+			filters["item_group"] = ["in", tuple(item_groups)]
+
+		del filters["pos_profile"]
+
+	else:
+		filters.pop("pos_profile", None)
+
+	return _item_query(doctype, txt, searchfield, start, page_len, filters, as_dict)
+
+
+def get_item_group(pos_profile):
+	item_groups = []
+	if pos_profile.get("item_groups"):
+		# Get items based on the item groups defined in the POS profile
+		for row in pos_profile.get("item_groups"):
+			item_groups.append(row.item_group)
+			item_groups.extend(get_descendants_of("Item Group", row.item_group))
+
+	return list(set(item_groups))

@@ -25,16 +25,17 @@ class BOMCreatorItem(Document):
 		fg_reference_id: DF.Data | None
 		instruction: DF.SmallText | None
 		is_expandable: DF.Check
+		is_subcontracted: DF.Check
 		item_code: DF.Link
 		item_group: DF.Link | None
 		item_name: DF.Data | None
+		operation: DF.Link | None
 		parent: DF.Data
 		parent_row_no: DF.Data | None
 		parentfield: DF.Data
 		parenttype: DF.Data
 		qty: DF.Float
 		rate: DF.Currency
-		source_warehouse: DF.Link | None
 		sourced_by_supplier: DF.Check
 		stock_qty: DF.Float
 		stock_uom: DF.Link | None

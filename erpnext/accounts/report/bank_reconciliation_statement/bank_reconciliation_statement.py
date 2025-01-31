@@ -32,10 +32,7 @@ def execute(filters=None):
 	amounts_not_reflected_in_system = get_amounts_not_reflected_in_system(filters)
 
 	bank_bal = (
-		flt(balance_as_per_system)
-		- flt(total_debit)
-		+ flt(total_credit)
-		+ amounts_not_reflected_in_system
+		flt(balance_as_per_system) - flt(total_debit) + flt(total_credit) + amounts_not_reflected_in_system
 	)
 
 	data += [
@@ -145,7 +142,8 @@ def get_journal_entries(filters):
 		where jvd.parent = jv.name and jv.docstatus=1
 			and jvd.account = %(account)s and jv.posting_date <= %(report_date)s
 			and ifnull(jv.clearance_date, '4000-01-01') > %(report_date)s
-			and ifnull(jv.is_opening, 'No') = 'No'""",
+			and ifnull(jv.is_opening, 'No') = 'No'
+			and jv.company = %(company)s """,
 		filters,
 		as_dict=1,
 	)
@@ -157,8 +155,8 @@ def get_payment_entries(filters):
 		select
 			"Payment Entry" as payment_document, name as payment_entry,
 			reference_no, reference_date as ref_date,
-			if(paid_to=%(account)s, received_amount, 0) as debit,
-			if(paid_from=%(account)s, paid_amount, 0) as credit,
+			if(paid_to=%(account)s, received_amount_after_tax, 0) as debit,
+			if(paid_from=%(account)s, paid_amount_after_tax, 0) as credit,
 			posting_date, ifnull(party,if(paid_from=%(account)s,paid_to,paid_from)) as against_account, clearance_date,
 			if(paid_to=%(account)s, paid_to_account_currency, paid_from_account_currency) as account_currency
 		from `tabPayment Entry`
@@ -166,6 +164,7 @@ def get_payment_entries(filters):
 			(paid_from=%(account)s or paid_to=%(account)s) and docstatus=1
 			and posting_date <= %(report_date)s
 			and ifnull(clearance_date, '4000-01-01') > %(report_date)s
+			and company = %(company)s
 	""",
 		filters,
 		as_dict=1,
@@ -184,6 +183,7 @@ def get_pos_entries(filters):
 				sip.account=%(account)s and si.docstatus=1 and sip.parent = si.name
 				and account.name = sip.account and si.posting_date <= %(report_date)s and
 				ifnull(sip.clearance_date, '4000-01-01') > %(report_date)s
+				and si.company = %(company)s
 			order by
 				si.posting_date ASC, si.name DESC
 		""",

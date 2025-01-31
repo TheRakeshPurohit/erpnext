@@ -25,6 +25,14 @@ erpnext.buying = {
 					};
 				});
 
+				this.frm.set_query("project", function (doc) {
+					return {
+						filters: {
+							company: doc.company,
+						},
+					};
+				});
+
 				if (this.frm.doc.__islocal
 					&& frappe.meta.has_field(this.frm.doc.doctype, "disable_rounded_total")) {
 
@@ -73,11 +81,6 @@ erpnext.buying = {
 
 				me.frm.set_query('billing_address', erpnext.queries.company_address_query);
 				erpnext.accounts.dimensions.setup_dimension_filters(me.frm, me.frm.doctype);
-
-				if(this.frm.fields_dict.supplier) {
-					this.frm.set_query("supplier", function() {
-						return{	query: "erpnext.controllers.queries.supplier_query" }});
-				}
 
 				this.frm.set_query("item_code", "items", function() {
 					if (me.frm.doc.is_subcontracted) {
@@ -134,7 +137,7 @@ erpnext.buying = {
 			}
 
 			toggle_subcontracting_fields() {
-				if (in_list(['Purchase Receipt', 'Purchase Invoice'], this.frm.doc.doctype)) {
+				if (['Purchase Receipt', 'Purchase Invoice'].includes(this.frm.doc.doctype)) {
 					this.frm.fields_dict.supplied_items.grid.update_docfield_property('consumed_qty',
 						'read_only', this.frm.doc.__onload && this.frm.doc.__onload.backflush_based_on === 'BOM');
 
@@ -147,6 +150,25 @@ erpnext.buying = {
 				var me = this;
 				erpnext.utils.get_party_details(this.frm, null, null, function(){
 					me.apply_price_list();
+				});
+			}
+
+			company(){
+				if(!frappe.meta.has_field(this.frm.doc.doctype, "billing_address")) return;
+
+				frappe.call({
+					method: "erpnext.setup.doctype.company.company.get_billing_shipping_address",
+					args: {
+						name: this.frm.doc.company,
+						billing_address:this.frm.doc.billing_address,
+						shipping_address: this.frm.doc.shipping_address
+					},
+					callback: (r) => {
+						this.frm.set_value("billing_address", r.message.primary_address || "");
+
+						if(!frappe.meta.has_field(this.frm.doc.doctype, "shipping_address")) return;
+						this.frm.set_value("shipping_address", r.message.shipping_address || "");
+					},
 				});
 			}
 
@@ -347,39 +369,40 @@ erpnext.buying = {
 			add_serial_batch_bundle(doc, cdt, cdn) {
 				let item = locals[cdt][cdn];
 				let me = this;
-				let path = "assets/erpnext/js/utils/serial_no_batch_selector.js";
+				let fields = ["has_batch_no", "has_serial_no"];
 
-				frappe.db.get_value("Item", item.item_code, ["has_batch_no", "has_serial_no"])
+				frappe.db.get_value("Item", item.item_code, fields)
 					.then((r) => {
 						if (r.message && (r.message.has_batch_no || r.message.has_serial_no)) {
-							item.has_serial_no = r.message.has_serial_no;
-							item.has_batch_no = r.message.has_batch_no;
+							fields.forEach((field) => {
+								item[field] = r.message[field];
+							});
+
 							item.type_of_transaction = item.qty > 0 ? "Inward" : "Outward";
 							item.is_rejected = false;
 
-							frappe.require(path, function() {
-								new erpnext.SerialBatchPackageSelector(
-									me.frm, item, (r) => {
-										if (r) {
-											let qty = Math.abs(r.total_qty);
-											if (doc.is_return) {
-												qty = qty * -1;
-											}
-
-											let update_values = {
-												"serial_and_batch_bundle": r.name,
-												"qty": qty
-											}
-
-											if (r.warehouse) {
-												update_values["warehouse"] = r.warehouse;
-											}
-
-											frappe.model.set_value(item.doctype, item.name, update_values);
+							new erpnext.SerialBatchPackageSelector(
+								me.frm, item, (r) => {
+									if (r) {
+										let qty = Math.abs(r.total_qty);
+										if (doc.is_return) {
+											qty = qty * -1;
 										}
+
+										let update_values = {
+											"serial_and_batch_bundle": r.name,
+											"use_serial_batch_fields": 0,
+											"qty": qty / flt(item.conversion_factor || 1, precision("conversion_factor", item))
+										}
+
+										if (r.warehouse) {
+											update_values["warehouse"] = r.warehouse;
+										}
+
+										frappe.model.set_value(item.doctype, item.name, update_values);
 									}
-								);
-							});
+								}
+							);
 						}
 					});
 			}
@@ -387,39 +410,40 @@ erpnext.buying = {
 			add_serial_batch_for_rejected_qty(doc, cdt, cdn) {
 				let item = locals[cdt][cdn];
 				let me = this;
-				let path = "assets/erpnext/js/utils/serial_no_batch_selector.js";
+				let fields = ["has_batch_no", "has_serial_no"];
 
-				frappe.db.get_value("Item", item.item_code, ["has_batch_no", "has_serial_no"])
+				frappe.db.get_value("Item", item.item_code, fields)
 					.then((r) => {
 						if (r.message && (r.message.has_batch_no || r.message.has_serial_no)) {
-							item.has_serial_no = r.message.has_serial_no;
-							item.has_batch_no = r.message.has_batch_no;
-							item.type_of_transaction = item.qty > 0 ? "Inward" : "Outward";
+							fields.forEach((field) => {
+								item[field] = r.message[field];
+							});
+
+							item.type_of_transaction = !doc.is_return > 0 ? "Inward" : "Outward";
 							item.is_rejected = true;
 
-							frappe.require(path, function() {
-								new erpnext.SerialBatchPackageSelector(
-									me.frm, item, (r) => {
-										if (r) {
-											let qty = Math.abs(r.total_qty);
-											if (doc.is_return) {
-												qty = qty * -1;
-											}
-
-											let update_values = {
-												"serial_and_batch_bundle": r.name,
-												"rejected_qty": qty
-											}
-
-											if (r.warehouse) {
-												update_values["rejected_warehouse"] = r.warehouse;
-											}
-
-											frappe.model.set_value(item.doctype, item.name, update_values);
+							new erpnext.SerialBatchPackageSelector(
+								me.frm, item, (r) => {
+									if (r) {
+										let qty = Math.abs(r.total_qty);
+										if (doc.is_return) {
+											qty = qty * -1;
 										}
+
+										let update_values = {
+											"rejected_serial_and_batch_bundle": r.name,
+											"use_serial_batch_fields": 0,
+											"rejected_qty": qty / flt(item.conversion_factor || 1, precision("conversion_factor", item))
+										}
+
+										if (r.warehouse) {
+											update_values["rejected_warehouse"] = r.warehouse;
+										}
+
+										frappe.model.set_value(item.doctype, item.name, update_values);
 									}
-								);
-							});
+								}
+							);
 						}
 					});
 			}

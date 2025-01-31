@@ -3,7 +3,6 @@
 
 
 import json
-from typing import Dict
 
 import frappe
 from frappe import _
@@ -14,6 +13,9 @@ from erpnext.stock.doctype.item.item import get_last_purchase_details, validate_
 
 def update_last_purchase_rate(doc, is_submit) -> None:
 	"""updates last_purchase_rate in item table for each item"""
+
+	if doc.get("is_internal_supplier"):
+		return
 
 	this_purchase_date = getdate(doc.get("posting_date") or doc.get("transaction_date"))
 
@@ -82,7 +84,7 @@ def set_stock_levels(row) -> None:
 			row.set(field, qty_data[field])
 
 
-def validate_item_and_get_basic_data(row) -> Dict:
+def validate_item_and_get_basic_data(row) -> dict:
 	item = frappe.db.get_values(
 		"Item",
 		filters={"name": row.item_code},
@@ -96,12 +98,7 @@ def validate_item_and_get_basic_data(row) -> Dict:
 
 
 def validate_stock_item_warehouse(row, item) -> None:
-	if (
-		item.is_stock_item == 1
-		and row.qty
-		and not row.warehouse
-		and not row.get("delivered_by_supplier")
-	):
+	if item.is_stock_item == 1 and row.qty and not row.warehouse and not row.get("delivered_by_supplier"):
 		frappe.throw(
 			_("Row #{1}: Warehouse is mandatory for stock Item {0}").format(
 				frappe.bold(row.item_code), row.idx
@@ -113,9 +110,7 @@ def check_on_hold_or_closed_status(doctype, docname) -> None:
 	status = frappe.db.get_value(doctype, docname, "status")
 
 	if status in ("Closed", "On Hold"):
-		frappe.throw(
-			_("{0} {1} status is {2}").format(doctype, docname, status), frappe.InvalidStatusError
-		)
+		frappe.throw(_("{0} {1} status is {2}").format(doctype, docname, status), frappe.InvalidStatusError)
 
 
 @frappe.whitelist()

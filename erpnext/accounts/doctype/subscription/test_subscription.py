@@ -1,10 +1,9 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
-import unittest
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils.data import (
 	add_days,
 	add_months,
@@ -19,10 +18,19 @@ from frappe.utils.data import (
 
 from erpnext.accounts.doctype.subscription.subscription import get_prorata_factor
 
-test_dependencies = ("UOM", "Item Group", "Item")
+EXTRA_TEST_RECORD_DEPENDENCIES = ("UOM", "Item Group", "Item")
 
 
-class TestSubscription(FrappeTestCase):
+class UnitTestSubscription(UnitTestCase):
+	"""
+	Unit tests for Subscription.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestSubscription(IntegrationTestCase):
 	def setUp(self):
 		make_plans()
 		create_parties()
@@ -201,9 +209,7 @@ class TestSubscription(FrappeTestCase):
 
 		invoice = subscription.get_current_invoice()
 		diff = flt(date_diff(nowdate(), subscription.current_invoice_start) + 1)
-		plan_days = flt(
-			date_diff(subscription.current_invoice_end, subscription.current_invoice_start) + 1
-		)
+		plan_days = flt(date_diff(subscription.current_invoice_end, subscription.current_invoice_start) + 1)
 		prorate_factor = flt(diff / plan_days)
 
 		self.assertEqual(
@@ -249,9 +255,7 @@ class TestSubscription(FrappeTestCase):
 
 		invoice = subscription.get_current_invoice()
 		diff = flt(date_diff(nowdate(), subscription.current_invoice_start) + 1)
-		plan_days = flt(
-			date_diff(subscription.current_invoice_end, subscription.current_invoice_start) + 1
-		)
+		plan_days = flt(date_diff(subscription.current_invoice_end, subscription.current_invoice_start) + 1)
 		prorate_factor = flt(diff / plan_days)
 
 		self.assertEqual(flt(invoice.grand_total, 2), flt(prorate_factor * 900, 2))
@@ -385,9 +389,7 @@ class TestSubscription(FrappeTestCase):
 		settings.prorate = 1
 		settings.save()
 
-		subscription = create_subscription(
-			generate_invoice_at="Beginning of the current subscription period"
-		)
+		subscription = create_subscription(generate_invoice_at="Beginning of the current subscription period")
 		subscription.process()
 		subscription.cancel_subscription()
 
@@ -452,11 +454,11 @@ class TestSubscription(FrappeTestCase):
 
 		# Process subscription and create first invoice
 		# Subscription status will be unpaid since due date has already passed
-		subscription.process()
+		subscription.process(posting_date="2018-01-01")
 		self.assertEqual(len(subscription.invoices), 1)
 		self.assertEqual(subscription.status, "Unpaid")
 
-		subscription.process()
+		subscription.process(posting_date="2018-04-01")
 		self.assertEqual(len(subscription.invoices), 1)
 
 	def test_multi_currency_subscription(self):
@@ -469,7 +471,29 @@ class TestSubscription(FrappeTestCase):
 			party=party,
 		)
 
-		subscription.process()
+		subscription.process(posting_date="2018-01-01")
+		self.assertEqual(len(subscription.invoices), 1)
+		self.assertEqual(subscription.status, "Unpaid")
+
+		# Check the currency of the created invoice
+		currency = frappe.db.get_value("Sales Invoice", subscription.invoices[0].name, "currency")
+		self.assertEqual(currency, "USD")
+
+	@IntegrationTestCase.change_settings(
+		"Accounts Settings",
+		{"allow_multi_currency_invoices_against_single_party_account": 1},
+	)
+	def test_multi_currency_subscription_with_default_company_currency(self):
+		party = "Test Subscription Customer Multi Currency"
+		frappe.db.set_value("Customer", party, "default_currency", "USD")
+		subscription = create_subscription(
+			start_date="2018-01-01",
+			generate_invoice_at="Beginning of the current subscription period",
+			plans=[{"plan": "_Test Plan Multicurrency", "qty": 1, "currency": "USD"}],
+			party=party,
+		)
+
+		subscription.process(posting_date="2018-01-01")
 		self.assertEqual(len(subscription.invoices), 1)
 		self.assertEqual(subscription.status, "Unpaid")
 
@@ -483,7 +507,7 @@ class TestSubscription(FrappeTestCase):
 			start_date="2021-01-01",
 			submit_invoice=0,
 			generate_new_invoices_past_due_date=1,
-			party="_Test Subscription Customer",
+			party="_Test Subscription Customer John Doe",
 		)
 
 		# create invoices for the first two moths
@@ -528,6 +552,18 @@ class TestSubscription(FrappeTestCase):
 		subscription.process(posting_date="2023-01-22")
 		self.assertEqual(len(subscription.invoices), 2)
 
+	def test_future_subscription(self):
+		"""Force-Fetch should not process future subscriptions"""
+		subscription = create_subscription(
+			start_date=add_months(nowdate(), 1),
+			submit_invoice=0,
+			generate_new_invoices_past_due_date=1,
+			party="_Test Subscription Customer John Doe",
+		)
+		subscription.force_fetch_subscription_updates()
+		subscription.reload()
+		self.assertEqual(len(subscription.invoices), 0)
+
 
 def make_plans():
 	create_plan(plan_name="_Test Plan Name", cost=900, currency="INR")
@@ -546,9 +582,7 @@ def make_plans():
 		billing_interval_count=3,
 		currency="INR",
 	)
-	create_plan(
-		plan_name="_Test Plan Multicurrency", cost=50, billing_interval="Month", currency="USD"
-	)
+	create_plan(plan_name="_Test Plan Multicurrency", cost=50, billing_interval="Month", currency="USD")
 
 
 def create_plan(**kwargs):
@@ -574,10 +608,20 @@ def create_parties():
 	if not frappe.db.exists("Customer", "_Test Subscription Customer"):
 		customer = frappe.new_doc("Customer")
 		customer.customer_name = "_Test Subscription Customer"
-		customer.billing_currency = "USD"
-		customer.append(
-			"accounts", {"company": "_Test Company", "account": "_Test Receivable USD - _TC"}
-		)
+		customer.default_currency = "USD"
+		customer.append("accounts", {"company": "_Test Company", "account": "_Test Receivable USD - _TC"})
+		customer.insert()
+
+	if not frappe.db.exists("Customer", "_Test Subscription Customer Multi Currency"):
+		customer = frappe.new_doc("Customer")
+		customer.customer_name = "Test Subscription Customer Multi Currency"
+		customer.default_currency = "USD"
+		customer.insert()
+
+	if not frappe.db.exists("Customer", "_Test Subscription Customer John Doe"):
+		customer = frappe.new_doc("Customer")
+		customer.customer_name = "_Test Subscription Customer John Doe"
+		customer.append("accounts", {"company": "_Test Company", "account": "_Test Receivable - _TC"})
 		customer.insert()
 
 
@@ -600,9 +644,7 @@ def create_subscription(**kwargs):
 	subscription.additional_discount_percentage = kwargs.get("additional_discount_percentage")
 	subscription.additional_discount_amount = kwargs.get("additional_discount_amount")
 	subscription.follow_calendar_months = kwargs.get("follow_calendar_months")
-	subscription.generate_new_invoices_past_due_date = kwargs.get(
-		"generate_new_invoices_past_due_date"
-	)
+	subscription.generate_new_invoices_past_due_date = kwargs.get("generate_new_invoices_past_due_date")
 	subscription.submit_invoice = kwargs.get("submit_invoice")
 	subscription.days_until_due = kwargs.get("days_until_due")
 	subscription.number_of_days = kwargs.get("number_of_days")

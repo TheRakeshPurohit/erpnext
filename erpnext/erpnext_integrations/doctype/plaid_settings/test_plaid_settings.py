@@ -1,13 +1,12 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
-
 import json
 import unittest
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils.response import json_handler
 
-from erpnext.accounts.doctype.journal_entry.journal_entry import get_default_bank_cash_account
 from erpnext.erpnext_integrations.doctype.plaid_settings.plaid_settings import (
 	add_account_subtype,
 	add_account_type,
@@ -17,7 +16,7 @@ from erpnext.erpnext_integrations.doctype.plaid_settings.plaid_settings import (
 )
 
 
-class TestPlaidSettings(unittest.TestCase):
+class TestPlaidSettings(IntegrationTestCase):
 	def setUp(self):
 		pass
 
@@ -71,14 +70,6 @@ class TestPlaidSettings(unittest.TestCase):
 
 		bank = json.dumps(frappe.get_doc("Bank", "Citi").as_dict(), default=json_handler)
 		company = frappe.db.get_single_value("Global Defaults", "default_company")
-
-		if frappe.db.get_value("Company", company, "default_bank_account") is None:
-			frappe.db.set_value(
-				"Company",
-				company,
-				"default_bank_account",
-				get_default_bank_cash_account(company, "Cash").get("account"),
-			)
 
 		add_bank_accounts(bank_accounts, bank, company)
 

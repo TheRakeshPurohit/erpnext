@@ -4,15 +4,16 @@ import unittest
 import frappe
 import frappe.utils
 from frappe.model import mapper
-from frappe.test_runner import make_test_records
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_months, nowdate
 
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Item"]
 
-class TestMapper(unittest.TestCase):
+
+class TestMapper(IntegrationTestCase):
 	def test_map_docs(self):
 		"""Test mapping of multiple source docs on a single target doc"""
 
-		make_test_records("Item")
 		items = ["_Test Item", "_Test Item 2", "_Test FG Item"]
 
 		# Make source docs (quotations) and a target doc (sales order)
@@ -29,7 +30,6 @@ class TestMapper(unittest.TestCase):
 		self.assertEqual(set(d for d in src_items), set(d.item_code for d in updated_so.items))
 
 	def make_quotation(self, item_list, customer):
-
 		qtn = frappe.get_doc(
 			{
 				"doctype": "Quotation",

@@ -8,12 +8,14 @@ import frappe
 from frappe import _
 from frappe.utils import formatdate, get_link_to_form
 
+from erpnext.controllers.taxes_and_totals import ItemWiseTaxDetail
+
 
 def execute(filters=None):
 	return VATAuditReport(filters).run()
 
 
-class VATAuditReport(object):
+class VATAuditReport:
 	def __init__(self, filters=None):
 		self.filters = frappe._dict(filters or {})
 		self.columns = []
@@ -58,19 +60,17 @@ class VATAuditReport(object):
 		self.invoices = frappe._dict()
 
 		invoice_data = frappe.db.sql(
-			"""
+			f"""
 			SELECT
-				{select_columns}
+				{self.select_columns}
 			FROM
 				`tab{doctype}`
 			WHERE
-				docstatus = 1 {where_conditions}
+				docstatus = 1 {conditions}
 				and is_opening = 'No'
 			ORDER BY
 				posting_date DESC
-			""".format(
-				select_columns=self.select_columns, doctype=doctype, where_conditions=conditions
-			),
+			""",
 			self.filters,
 			as_dict=1,
 		)
@@ -86,11 +86,10 @@ class VATAuditReport(object):
 			SELECT
 				item_code, parent, base_net_amount, is_zero_rated
 			FROM
-				`tab%s Item`
+				`tab{} Item`
 			WHERE
-				parent in (%s)
-			"""
-			% (doctype, ", ".join(["%s"] * len(self.invoices))),
+				parent in ({})
+			""".format(doctype, ", ".join(["%s"] * len(self.invoices))),
 			tuple(self.invoices),
 			as_dict=1,
 		)
@@ -111,15 +110,14 @@ class VATAuditReport(object):
 			SELECT
 				parent, account_head, item_wise_tax_detail
 			FROM
-				`tab%s`
+				`tab{}`
 			WHERE
-				parenttype = %s and docstatus = 1
-				and parent in (%s)
+				parenttype = {} and docstatus = 1
+				and parent in ({})
 			ORDER BY
 				account_head
-			"""
-			% (self.tax_doctype, "%s", ", ".join(["%s"] * len(self.invoices.keys()))),
-			tuple([doctype] + list(self.invoices.keys())),
+			""".format(self.tax_doctype, "%s", ", ".join(["%s"] * len(self.invoices.keys()))),
+			tuple([doctype, *list(self.invoices.keys())]),
 		)
 
 		for parent, account, item_wise_tax_detail in self.tax_details:
@@ -129,12 +127,13 @@ class VATAuditReport(object):
 						item_wise_tax_detail = json.loads(item_wise_tax_detail)
 					else:
 						continue
-					for item_code, taxes in item_wise_tax_detail.items():
+					for item_code, tax_data in item_wise_tax_detail.items():
+						tax_data = ItemWiseTaxDetail(**tax_data)
 						is_zero_rated = self.invoice_items.get(parent).get(item_code).get("is_zero_rated")
 						# to skip items with non-zero tax rate in multiple rows
-						if taxes[0] == 0 and not is_zero_rated:
+						if tax_data.tax_rate == 0 and not is_zero_rated:
 							continue
-						tax_rate = self.get_item_amount_map(parent, item_code, taxes)
+						tax_rate = self.get_item_amount_map(parent, item_code, tax_data)
 
 						if tax_rate is not None:
 							rate_based_dict = self.items_based_on_tax_rate.setdefault(parent, {}).setdefault(
@@ -145,10 +144,12 @@ class VATAuditReport(object):
 				except ValueError:
 					continue
 
-	def get_item_amount_map(self, parent, item_code, taxes):
+	# TODO: now that tax_data holds net_amount, this method seems almost obsolete and can be removactored,
+	# gross_amount can be calculated on the file as a list comprehension
+	def get_item_amount_map(self, parent, item_code, tax_data):
 		net_amount = self.invoice_items.get(parent).get(item_code).get("net_amount")
-		tax_rate = taxes[0]
-		tax_amount = taxes[1]
+		tax_rate = tax_data.tax_rate
+		tax_amount = tax_data.tax_amount
 		gross_amount = net_amount + tax_amount
 
 		self.item_tax_rate.setdefault(parent, {}).setdefault(

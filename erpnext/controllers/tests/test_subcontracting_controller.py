@@ -5,7 +5,7 @@ import copy
 from collections import defaultdict
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase
 from frappe.utils import cint
 
 from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
@@ -16,8 +16,6 @@ from erpnext.controllers.subcontracting_controller import (
 from erpnext.manufacturing.doctype.production_plan.test_production_plan import make_bom
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle import (
-	get_batch_from_bundle,
-	get_serial_nos_from_bundle,
 	make_serial_batch_bundle,
 )
 from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
@@ -27,7 +25,7 @@ from erpnext.subcontracting.doctype.subcontracting_order.subcontracting_order im
 )
 
 
-class TestSubcontractingController(FrappeTestCase):
+class TestSubcontractingController(IntegrationTestCase):
 	def setUp(self):
 		make_subcontracted_items()
 		make_raw_materials()
@@ -140,6 +138,7 @@ class TestSubcontractingController(FrappeTestCase):
 		- Create partial SCR against the SCO and check serial nos and batch no.
 		"""
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 0)
 		set_backflush_based_on("Material Transferred for Subcontract")
 		service_items = [
 			{
@@ -202,6 +201,8 @@ class TestSubcontractingController(FrappeTestCase):
 				if value.get(field):
 					self.assertEqual(value.get(field), transferred_detais.get(field))
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 1)
+
 	def test_subcontracting_with_same_components_different_fg(self):
 		"""
 		- Set backflush based on Material Transfer.
@@ -211,6 +212,7 @@ class TestSubcontractingController(FrappeTestCase):
 		- Create partial SCR against the SCO and check serial nos.
 		"""
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 0)
 		set_backflush_based_on("Material Transferred for Subcontract")
 		service_items = [
 			{
@@ -278,6 +280,81 @@ class TestSubcontractingController(FrappeTestCase):
 			self.assertEqual(value.qty, 6)
 			self.assertEqual(sorted(value.serial_no), sorted(transferred_detais.get("serial_no")[6:12]))
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 1)
+
+	def test_return_non_consumed_batch_materials(self):
+		"""
+		- Set backflush based on Material Transfer.
+		- Create SCO for item Subcontracted Item SA2.
+		- Transfer the batched components from Stores to Supplier warehouse with serial nos.
+		- Transfer extra qty of component for the subcontracted item Subcontracted Item SA2.
+		- Create SCR for full qty against the SCO and change the qty of raw material.
+		- After that return the non consumed material back to the store from supplier's warehouse.
+		"""
+
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 0)
+		set_backflush_based_on("Material Transferred for Subcontract")
+		service_item = make_item("Subcontracted Service FG Item A", properties={"is_stock_item": 0}).name
+		fg_item = make_item(
+			"Subcontracted FG Item SA2", properties={"is_stock_item": 1, "is_sub_contracted_item": 1}
+		).name
+		rm_item = make_item(
+			"Subcontracted Batch RM Item SA2",
+			properties={
+				"is_stock_item": 1,
+				"create_new_batch": 1,
+				"has_batch_no": 1,
+				"batch_number_series": "BATCH-RM-IRM-.####",
+			},
+		).name
+
+		make_bom(item=fg_item, raw_materials=[rm_item], rate=100, currency="INR")
+
+		service_items = [
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": service_item,
+				"qty": 5,
+				"rate": 100,
+				"fg_item": fg_item,
+				"fg_item_qty": 5,
+			},
+		]
+		sco = get_subcontracting_order(service_items=service_items)
+		rm_items = get_rm_items(sco.supplied_items)
+		rm_items[0]["qty"] += 1
+		itemwise_details = make_stock_in_entry(rm_items=rm_items)
+
+		for item in rm_items:
+			item["sco_rm_detail"] = sco.items[0].name
+
+		make_stock_transfer_entry(
+			sco_no=sco.name,
+			rm_items=rm_items,
+			itemwise_details=copy.deepcopy(itemwise_details),
+		)
+
+		scr1 = make_subcontracting_receipt(sco.name)
+		scr1.save()
+		scr1.supplied_items[0].consumed_qty = 5
+		scr1.submit()
+
+		for key, value in get_supplied_items(scr1).items():
+			transferred_detais = itemwise_details.get(key)
+			self.assertEqual(value.qty, 5)
+			self.assertEqual(sorted(value.serial_no), sorted(transferred_detais.get("serial_no")[0:5]))
+
+		sco.load_from_db()
+		self.assertEqual(sco.supplied_items[0].consumed_qty, 5)
+		doc = get_materials_from_supplier(sco.name, [d.name for d in sco.supplied_items])
+		doc.save()
+		self.assertEqual(doc.items[0].qty, 1)
+		self.assertEqual(doc.items[0].s_warehouse, "_Test Warehouse 1 - _TC")
+		self.assertEqual(doc.items[0].t_warehouse, "_Test Warehouse - _TC")
+		self.assertTrue(doc.items[0].batch_no)
+		self.assertTrue(doc.items[0].use_serial_batch_fields)
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 1)
+
 	def test_return_non_consumed_materials(self):
 		"""
 		- Set backflush based on Material Transfer.
@@ -288,6 +365,7 @@ class TestSubcontractingController(FrappeTestCase):
 		- After that return the non consumed material back to the store from supplier's warehouse.
 		"""
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 0)
 		set_backflush_based_on("Material Transferred for Subcontract")
 		service_items = [
 			{
@@ -333,6 +411,7 @@ class TestSubcontractingController(FrappeTestCase):
 			get_serial_nos(doc.items[0].serial_no),
 			itemwise_details.get(doc.items[0].item_code)["serial_no"][5:6],
 		)
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 1)
 
 	def test_item_with_batch_based_on_bom(self):
 		"""
@@ -343,7 +422,6 @@ class TestSubcontractingController(FrappeTestCase):
 		- Create the 3 SCR against the SCO and split Subcontracted Items into two batches.
 		- Keep the qty as 2 for Subcontracted Item in the SCR.
 		"""
-		from erpnext.stock.serial_batch_bundle import get_batch_nos
 
 		set_backflush_based_on("BOM")
 		service_items = [
@@ -401,7 +479,7 @@ class TestSubcontractingController(FrappeTestCase):
 			{
 				"main_item_code": "Subcontracted Item SA4",
 				"item_code": "Subcontracted SRM Item 3",
-				"qty": 1.0,
+				"qty": 3.0,
 				"rate": 100.0,
 				"stock_uom": "Nos",
 				"warehouse": "_Test Warehouse - _TC",
@@ -426,7 +504,7 @@ class TestSubcontractingController(FrappeTestCase):
 		scr1.set_missing_values()
 		scr1.submit()
 
-		for key, value in get_supplied_items(scr1).items():
+		for _key, value in get_supplied_items(scr1).items():
 			self.assertEqual(value.qty, 4)
 
 		frappe.flags.add_debugger = True
@@ -438,7 +516,7 @@ class TestSubcontractingController(FrappeTestCase):
 		scr2.set_missing_values()
 		scr2.submit()
 
-		for key, value in get_supplied_items(scr2).items():
+		for _key, value in get_supplied_items(scr2).items():
 			self.assertEqual(value.qty, 4)
 
 		scr3 = make_subcontracting_receipt(sco.name)
@@ -448,7 +526,7 @@ class TestSubcontractingController(FrappeTestCase):
 		scr3.set_missing_values()
 		scr3.submit()
 
-		for key, value in get_supplied_items(scr3).items():
+		for _key, value in get_supplied_items(scr3).items():
 			self.assertEqual(value.qty, 2)
 
 	def test_item_with_batch_based_on_material_transfer(self):
@@ -555,7 +633,7 @@ class TestSubcontractingController(FrappeTestCase):
 		scr2.set_missing_values()
 		scr2.submit()
 
-		for key, value in get_supplied_items(scr2).items():
+		for value in get_supplied_items(scr2).values():
 			self.assertEqual(value.qty, 4)
 
 		scr3 = make_subcontracting_receipt(sco.name)
@@ -565,7 +643,7 @@ class TestSubcontractingController(FrappeTestCase):
 		scr3.set_missing_values()
 		scr3.submit()
 
-		for key, value in get_supplied_items(scr3).items():
+		for value in get_supplied_items(scr3).values():
 			self.assertEqual(value.qty, 1)
 
 	def test_partial_transfer_serial_no_components_based_on_material_transfer(self):
@@ -578,6 +656,7 @@ class TestSubcontractingController(FrappeTestCase):
 		- Create SCR for remaining qty against the SCO and change the qty manually.
 		"""
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 0)
 		set_backflush_based_on("Material Transferred for Subcontract")
 		service_items = [
 			{
@@ -643,6 +722,8 @@ class TestSubcontractingController(FrappeTestCase):
 			self.assertEqual(value.qty, details.qty)
 			self.assertEqual(sorted(value.serial_no), sorted(details.serial_no))
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 1)
+
 	def test_incorrect_serial_no_components_based_on_material_transfer(self):
 		"""
 		- Set backflush based on Material Transferred for Subcontract.
@@ -652,6 +733,7 @@ class TestSubcontractingController(FrappeTestCase):
 		- System should throw the error and not allowed to save the SCR.
 		"""
 
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 0)
 		serial_no = "ABC"
 		if not frappe.db.exists("Serial No", serial_no):
 			frappe.get_doc(
@@ -688,9 +770,7 @@ class TestSubcontractingController(FrappeTestCase):
 
 		scr1 = make_subcontracting_receipt(sco.name)
 		scr1.save()
-		bundle = frappe.get_doc(
-			"Serial and Batch Bundle", scr1.supplied_items[0].serial_and_batch_bundle
-		)
+		bundle = frappe.get_doc("Serial and Batch Bundle", scr1.supplied_items[0].serial_and_batch_bundle)
 		original_serial_no = ""
 		for row in bundle.entries:
 			if row.idx == 1:
@@ -712,6 +792,7 @@ class TestSubcontractingController(FrappeTestCase):
 		scr1.save()
 		self.delete_bundle_from_scr(scr1)
 		scr1.delete()
+		frappe.db.set_single_value("Stock Settings", "use_serial_batch_fields", 1)
 
 	@staticmethod
 	def delete_bundle_from_scr(scr):
@@ -760,7 +841,6 @@ class TestSubcontractingController(FrappeTestCase):
 		scr1.items[0].qty = 5
 		scr1.save()
 
-		transferred_batch_no = ""
 		for key, value in get_supplied_items(scr1).items():
 			details = itemwise_details.get(key)
 			self.assertEqual(value.qty, 3)
@@ -844,6 +924,223 @@ class TestSubcontractingController(FrappeTestCase):
 		for item in sco.get("supplied_items"):
 			self.assertEqual(item.supplied_qty, 0.0)
 
+	def test_sco_with_material_transfer_with_use_serial_batch_fields(self):
+		"""
+		- Set backflush based on Material Transfer.
+		- Create SCO for the item Subcontracted Item SA1 and Subcontracted Item SA5.
+		- Transfer the components from Stores to Supplier warehouse with batch no and serial nos.
+		- Transfer extra item Subcontracted SRM Item 4 for the subcontract item Subcontracted Item SA5.
+		- Create partial SCR against the SCO and check serial nos and batch no.
+		"""
+
+		set_backflush_based_on("Material Transferred for Subcontract")
+		service_items = [
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item 1",
+				"qty": 5,
+				"rate": 100,
+				"fg_item": "Subcontracted Item SA1",
+				"fg_item_qty": 5,
+			},
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item 5",
+				"qty": 6,
+				"rate": 100,
+				"fg_item": "Subcontracted Item SA5",
+				"fg_item_qty": 6,
+			},
+		]
+		sco = get_subcontracting_order(service_items=service_items)
+		rm_items = get_rm_items(sco.supplied_items)
+		rm_items.append(
+			{
+				"main_item_code": "Subcontracted Item SA5",
+				"item_code": "Subcontracted SRM Item 4",
+				"qty": 6,
+			}
+		)
+		itemwise_details = make_stock_in_entry(rm_items=rm_items)
+
+		for item in rm_items:
+			item["sco_rm_detail"] = sco.items[0].name if item.get("qty") == 5 else sco.items[1].name
+
+		make_stock_transfer_entry(
+			sco_no=sco.name,
+			rm_items=rm_items,
+			itemwise_details=copy.deepcopy(itemwise_details),
+		)
+
+		scr1 = make_subcontracting_receipt(sco.name)
+		scr1.remove(scr1.items[1])
+		scr1.save()
+		scr1.submit()
+
+		for key, value in get_supplied_items(scr1).items():
+			transferred_detais = itemwise_details.get(key)
+
+			for field in ["qty", "serial_no", "batch_no"]:
+				if value.get(field):
+					data = value.get(field)
+					if field == "serial_no":
+						data = sorted(data)
+
+					self.assertEqual(data, transferred_detais.get(field))
+
+		scr2 = make_subcontracting_receipt(sco.name)
+		scr2.save()
+		scr2.submit()
+
+		for key, value in get_supplied_items(scr2).items():
+			transferred_detais = itemwise_details.get(key)
+
+			for field in ["qty", "serial_no", "batch_no"]:
+				if value.get(field):
+					data = value.get(field)
+					if field == "serial_no":
+						data = sorted(data)
+
+					self.assertEqual(data, transferred_detais.get(field))
+
+	def test_subcontracting_with_same_components_different_fg_with_serial_batch_fields(self):
+		"""
+		- Set backflush based on Material Transfer.
+		- Create SCO for the item Subcontracted Item SA2 and Subcontracted Item SA3.
+		- Transfer the components from Stores to Supplier warehouse with serial nos.
+		- Transfer extra qty of components for the item Subcontracted Item SA2.
+		- Create partial SCR against the SCO and check serial nos.
+		"""
+
+		set_backflush_based_on("Material Transferred for Subcontract")
+		service_items = [
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item 2",
+				"qty": 5,
+				"rate": 100,
+				"fg_item": "Subcontracted Item SA2",
+				"fg_item_qty": 5,
+			},
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item 3",
+				"qty": 6,
+				"rate": 100,
+				"fg_item": "Subcontracted Item SA3",
+				"fg_item_qty": 6,
+			},
+		]
+		sco = get_subcontracting_order(service_items=service_items)
+		rm_items = get_rm_items(sco.supplied_items)
+		rm_items[0]["qty"] += 1
+		itemwise_details = make_stock_in_entry(rm_items=rm_items)
+
+		for item in rm_items:
+			item["sco_rm_detail"] = sco.items[0].name if item.get("qty") == 5 else sco.items[1].name
+			item["use_serial_batch_fields"] = 1
+
+		make_stock_transfer_entry(
+			sco_no=sco.name,
+			rm_items=rm_items,
+			itemwise_details=copy.deepcopy(itemwise_details),
+		)
+
+		scr1 = make_subcontracting_receipt(sco.name)
+		scr1.items[0].qty = 3
+		scr1.remove(scr1.items[1])
+		scr1.save()
+		scr1.submit()
+
+		for key, value in get_supplied_items(scr1).items():
+			transferred_detais = itemwise_details.get(key)
+
+			self.assertEqual(value.qty, 4)
+			self.assertEqual(sorted(value.serial_no), sorted(transferred_detais.get("serial_no")[0:4]))
+
+		scr2 = make_subcontracting_receipt(sco.name)
+		scr2.items[0].qty = 2
+		scr2.remove(scr2.items[1])
+		scr2.save()
+		scr2.submit()
+
+		for key, value in get_supplied_items(scr2).items():
+			transferred_detais = itemwise_details.get(key)
+
+			self.assertEqual(value.qty, 2)
+			self.assertEqual(sorted(value.serial_no), sorted(transferred_detais.get("serial_no")[4:6]))
+
+		scr3 = make_subcontracting_receipt(sco.name)
+		scr3.save()
+		scr3.submit()
+
+		for key, value in get_supplied_items(scr3).items():
+			transferred_detais = itemwise_details.get(key)
+
+			self.assertEqual(value.qty, 6)
+			self.assertEqual(sorted(value.serial_no), sorted(transferred_detais.get("serial_no")[6:12]))
+
+	def test_return_non_consumed_materials_with_serial_batch_fields(self):
+		"""
+		- Set backflush based on Material Transfer.
+		- Create SCO for item Subcontracted Item SA2.
+		- Transfer the components from Stores to Supplier warehouse with serial nos.
+		- Transfer extra qty of component for the subcontracted item Subcontracted Item SA2.
+		- Create SCR for full qty against the SCO and change the qty of raw material.
+		- After that return the non consumed material back to the store from supplier's warehouse.
+		"""
+
+		set_backflush_based_on("Material Transferred for Subcontract")
+		service_items = [
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item 2",
+				"qty": 5,
+				"rate": 100,
+				"fg_item": "Subcontracted Item SA2",
+				"fg_item_qty": 5,
+			},
+		]
+		sco = get_subcontracting_order(service_items=service_items)
+		rm_items = get_rm_items(sco.supplied_items)
+		rm_items[0]["qty"] += 1
+		itemwise_details = make_stock_in_entry(rm_items=rm_items)
+
+		for item in rm_items:
+			item["use_serial_batch_fields"] = 1
+			item["sco_rm_detail"] = sco.items[0].name
+
+		make_stock_transfer_entry(
+			sco_no=sco.name,
+			rm_items=rm_items,
+			itemwise_details=copy.deepcopy(itemwise_details),
+		)
+
+		scr1 = make_subcontracting_receipt(sco.name)
+		scr1.save()
+		scr1.supplied_items[0].consumed_qty = 5
+		scr1.supplied_items[0].serial_no = "\n".join(
+			sorted(itemwise_details.get("Subcontracted SRM Item 2").get("serial_no")[0:5])
+		)
+		scr1.submit()
+
+		for key, value in get_supplied_items(scr1).items():
+			transferred_detais = itemwise_details.get(key)
+			self.assertTrue(value.use_serial_batch_fields)
+			self.assertEqual(value.qty, 5)
+			self.assertEqual(sorted(value.serial_no), sorted(transferred_detais.get("serial_no")[0:5]))
+
+		sco.load_from_db()
+		self.assertEqual(sco.supplied_items[0].consumed_qty, 5)
+		doc = get_materials_from_supplier(sco.name, [d.name for d in sco.supplied_items])
+		self.assertEqual(doc.items[0].qty, 1)
+		self.assertEqual(doc.items[0].s_warehouse, "_Test Warehouse 1 - _TC")
+		self.assertEqual(doc.items[0].t_warehouse, "_Test Warehouse - _TC")
+		self.assertEqual(
+			get_serial_nos(doc.items[0].serial_no),
+			itemwise_details.get(doc.items[0].item_code)["serial_no"][5:6],
+		)
+
 
 def add_second_row_in_scr(scr):
 	item_dict = {}
@@ -909,17 +1206,10 @@ def make_stock_in_entry(**args):
 
 def update_item_details(child_row, details):
 	details.qty += (
-		child_row.get("qty")
-		if child_row.doctype == "Stock Entry Detail"
-		else child_row.get("consumed_qty")
+		child_row.get("qty") if child_row.doctype == "Stock Entry Detail" else child_row.get("consumed_qty")
 	)
 
-	if child_row.serial_no:
-		details.serial_no.extend(get_serial_nos(child_row.serial_no))
-
-	if child_row.batch_no:
-		details.batch_no[child_row.batch_no] += child_row.get("qty") or child_row.get("consumed_qty")
-
+	details.use_serial_batch_fields = child_row.get("use_serial_batch_fields")
 	if child_row.serial_and_batch_bundle:
 		doc = frappe.get_doc("Serial and Batch Bundle", child_row.serial_and_batch_bundle)
 		for row in doc.get("entries"):
@@ -927,7 +1217,15 @@ def update_item_details(child_row, details):
 				details.serial_no.append(row.serial_no)
 
 			if row.batch_no:
-				details.batch_no[row.batch_no] += row.qty * (-1 if doc.type_of_transaction == "Outward" else 1)
+				details.batch_no[row.batch_no] += row.qty * (
+					-1 if doc.type_of_transaction == "Outward" else 1
+				)
+	else:
+		if child_row.serial_no:
+			details.serial_no.extend(get_serial_nos(child_row.serial_no))
+
+		if child_row.batch_no:
+			details.batch_no[child_row.batch_no] += child_row.get("qty") or child_row.get("consumed_qty")
 
 
 def make_stock_transfer_entry(**args):
@@ -945,6 +1243,7 @@ def make_stock_transfer_entry(**args):
 			"rate": row.rate or 100,
 			"stock_uom": row.stock_uom or "Nos",
 			"warehouse": row.warehouse or "_Test Warehouse - _TC",
+			"use_serial_batch_fields": row.get("use_serial_batch_fields"),
 		}
 
 		item_details = args.itemwise_details.get(row.item_code)
@@ -960,9 +1259,12 @@ def make_stock_transfer_entry(**args):
 				if batch_qty >= row.qty:
 					batches[batch_no] = row.qty
 					item_details.batch_no[batch_no] -= row.qty
+					if row.get("use_serial_batch_fields"):
+						item["batch_no"] = batch_no
+
 					break
 
-		if serial_nos or batches:
+		if not row.get("use_serial_batch_fields") and (serial_nos or batches):
 			item["serial_and_batch_bundle"] = make_serial_batch_bundle(
 				frappe._dict(
 					{
@@ -977,6 +1279,9 @@ def make_stock_transfer_entry(**args):
 					}
 				)
 			).name
+
+		if serial_nos and row.get("use_serial_batch_fields"):
+			item["serial_no"] = "\n".join(serial_nos)
 
 		items.append(item)
 
@@ -1002,6 +1307,7 @@ def make_subcontracted_items():
 		"Subcontracted Item SA6": {},
 		"Subcontracted Item SA7": {},
 		"Subcontracted Item SA8": {},
+		"Subcontracted Item SA9": {"stock_uom": "Litre"},
 	}
 
 	for item, properties in sub_contracted_items.items():
@@ -1022,15 +1328,19 @@ def make_raw_materials():
 		"Subcontracted SRM Item 4": {"has_serial_no": 1, "serial_no_series": "SRII.####"},
 		"Subcontracted SRM Item 5": {"has_serial_no": 1, "serial_no_series": "SRIID.####"},
 		"Subcontracted SRM Item 8": {},
+		"Subcontracted SRM Item 9": {"stock_uom": "Litre"},
 	}
 
 	for item, properties in raw_materials.items():
 		if not frappe.db.exists("Item", item):
 			properties.update({"is_stock_item": 1})
+			properties.update({"valuation_rate": 100})
 			make_item(item, properties)
 
 
-def make_service_item(item, properties={}):
+def make_service_item(item, properties=None):
+	if properties is None:
+		properties = {}
 	if not frappe.db.exists("Item", item):
 		properties.update({"is_stock_item": 0})
 		make_item(item, properties)
@@ -1046,6 +1356,7 @@ def make_service_items():
 		"Subcontracted Service Item 6": {},
 		"Subcontracted Service Item 7": {},
 		"Subcontracted Service Item 8": {},
+		"Subcontracted Service Item 9": {},
 	}
 
 	for item, properties in service_items.items():
@@ -1074,13 +1385,11 @@ def make_bom_for_subcontracted_items():
 
 	for item_code, raw_materials in boms.items():
 		if not frappe.db.exists("BOM", {"item": item_code}):
-			make_bom(item=item_code, raw_materials=raw_materials, rate=100)
+			make_bom(item=item_code, raw_materials=raw_materials, rate=100, currency="INR")
 
 
 def set_backflush_based_on(based_on):
-	frappe.db.set_single_value(
-		"Buying Settings", "backflush_raw_materials_of_subcontract_based_on", based_on
-	)
+	frappe.db.set_single_value("Buying Settings", "backflush_raw_materials_of_subcontract_based_on", based_on)
 
 
 def get_subcontracting_order(**args):
@@ -1132,6 +1441,7 @@ def get_rm_items(supplied_items):
 				"rate": item.rate,
 				"stock_uom": item.stock_uom,
 				"warehouse": item.reserve_warehouse,
+				"use_serial_batch_fields": 0,
 			}
 		)
 

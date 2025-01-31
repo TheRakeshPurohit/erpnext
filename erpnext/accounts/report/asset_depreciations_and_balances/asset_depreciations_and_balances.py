@@ -28,14 +28,14 @@ def get_group_by_asset_category_data(filters):
 
 	for asset_category in asset_categories:
 		row = frappe._dict()
-		# row.asset_category = asset_category
 		row.update(asset_category)
 
-		row.cost_as_on_to_date = (
-			flt(row.cost_as_on_from_date)
-			+ flt(row.cost_of_new_purchase)
-			- flt(row.cost_of_sold_asset)
-			- flt(row.cost_of_scrapped_asset)
+		row.value_as_on_to_date = (
+			flt(row.value_as_on_from_date)
+			+ flt(row.value_of_new_purchase)
+			- flt(row.value_of_sold_asset)
+			- flt(row.value_of_scrapped_asset)
+			- flt(row.value_of_capitalized_asset)
 		)
 
 		row.update(
@@ -52,11 +52,11 @@ def get_group_by_asset_category_data(filters):
 			- flt(row.depreciation_eliminated_during_the_period)
 		)
 
-		row.net_asset_value_as_on_from_date = flt(row.cost_as_on_from_date) - flt(
+		row.net_asset_value_as_on_from_date = flt(row.value_as_on_from_date) - flt(
 			row.accumulated_depreciation_as_on_from_date
 		)
 
-		row.net_asset_value_as_on_to_date = flt(row.cost_as_on_to_date) - flt(
+		row.net_asset_value_as_on_to_date = flt(row.value_as_on_to_date) - flt(
 			row.accumulated_depreciation_as_on_to_date
 		)
 
@@ -68,57 +68,77 @@ def get_group_by_asset_category_data(filters):
 def get_asset_categories_for_grouped_by_category(filters):
 	condition = ""
 	if filters.get("asset_category"):
-		condition += " and asset_category = %(asset_category)s"
+		condition += " and a.asset_category = %(asset_category)s"
+	if filters.get("finance_book"):
+		condition += " and exists (select 1 from `tabAsset Depreciation Schedule` ads where ads.asset = a.name and ads.finance_book = %(finance_book)s)"
+
+	# nosemgrep
 	return frappe.db.sql(
-		"""
-		SELECT asset_category,
-			   ifnull(sum(case when purchase_date < %(from_date)s then
-							   case when ifnull(disposal_date, 0) = 0 or disposal_date >= %(from_date)s then
-									gross_purchase_amount
+		f"""
+		SELECT a.asset_category,
+			   ifnull(sum(case when a.purchase_date < %(from_date)s then
+							   case when ifnull(a.disposal_date, 0) = 0 or a.disposal_date >= %(from_date)s then
+									a.gross_purchase_amount
 							   else
 									0
 							   end
 						   else
 								0
-						   end), 0) as cost_as_on_from_date,
-			   ifnull(sum(case when purchase_date >= %(from_date)s then
-			   						gross_purchase_amount
+						   end), 0) as value_as_on_from_date,
+			   ifnull(sum(case when a.purchase_date >= %(from_date)s then
+			   						a.gross_purchase_amount
 			   				   else
 			   				   		0
-			   				   end), 0) as cost_of_new_purchase,
-			   ifnull(sum(case when ifnull(disposal_date, 0) != 0
-			   						and disposal_date >= %(from_date)s
-			   						and disposal_date <= %(to_date)s then
-							   case when status = "Sold" then
-							   		gross_purchase_amount
+			   				   end), 0) as value_of_new_purchase,
+			   ifnull(sum(case when ifnull(a.disposal_date, 0) != 0
+			   						and a.disposal_date >= %(from_date)s
+			   						and a.disposal_date <= %(to_date)s then
+							   case when a.status = "Sold" then
+							   		a.gross_purchase_amount
 							   else
 							   		0
 							   end
 						   else
 								0
-						   end), 0) as cost_of_sold_asset,
-			   ifnull(sum(case when ifnull(disposal_date, 0) != 0
-			   						and disposal_date >= %(from_date)s
-			   						and disposal_date <= %(to_date)s then
-							   case when status = "Scrapped" then
-							   		gross_purchase_amount
+						   end), 0) as value_of_sold_asset,
+			   ifnull(sum(case when ifnull(a.disposal_date, 0) != 0
+			   						and a.disposal_date >= %(from_date)s
+			   						and a.disposal_date <= %(to_date)s then
+							   case when a.status = "Scrapped" then
+							   		a.gross_purchase_amount
 							   else
 							   		0
 							   end
 						   else
 								0
-						   end), 0) as cost_of_scrapped_asset
-		from `tabAsset`
-		where docstatus=1 and company=%(company)s and purchase_date <= %(to_date)s {}
-		group by asset_category
-	""".format(
-			condition
-		),
+						   end), 0) as value_of_scrapped_asset,
+				ifnull(sum(case when ifnull(a.disposal_date, 0) != 0
+			   						and a.disposal_date >= %(from_date)s
+			   						and a.disposal_date <= %(to_date)s then
+							   case when a.status = "Capitalized" then
+							   		a.gross_purchase_amount
+							   else
+							   		0
+							   end
+						   else
+								0
+						   end), 0) as value_of_capitalized_asset
+		from `tabAsset` a
+		where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s {condition}
+			and not exists(
+				select 1 from `tabAsset Capitalization Asset Item` acai join `tabAsset Capitalization` ac on acai.parent=ac.name
+				where acai.asset = a.name
+				and ac.posting_date < %(from_date)s
+				and ac.docstatus=1
+			)
+		group by a.asset_category
+	""",
 		{
 			"to_date": filters.to_date,
 			"from_date": filters.from_date,
 			"company": filters.company,
 			"asset_category": filters.get("asset_category"),
+			"finance_book": filters.get("finance_book"),
 		},
 		as_dict=1,
 	)
@@ -127,57 +147,77 @@ def get_asset_categories_for_grouped_by_category(filters):
 def get_asset_details_for_grouped_by_category(filters):
 	condition = ""
 	if filters.get("asset"):
-		condition += " and name = %(asset)s"
+		condition += " and a.name = %(asset)s"
+	if filters.get("finance_book"):
+		condition += " and exists (select 1 from `tabAsset Depreciation Schedule` ads where ads.asset = a.name and ads.finance_book = %(finance_book)s)"
+
+	# nosemgrep
 	return frappe.db.sql(
-		"""
-		SELECT name,
-			   ifnull(sum(case when purchase_date < %(from_date)s then
-							   case when ifnull(disposal_date, 0) = 0 or disposal_date >= %(from_date)s then
-									gross_purchase_amount
+		f"""
+		SELECT a.name,
+			   ifnull(sum(case when a.purchase_date < %(from_date)s then
+							   case when ifnull(a.disposal_date, 0) = 0 or a.disposal_date >= %(from_date)s then
+									a.gross_purchase_amount
 							   else
 									0
 							   end
 						   else
 								0
-						   end), 0) as cost_as_on_from_date,
-			   ifnull(sum(case when purchase_date >= %(from_date)s then
-			   						gross_purchase_amount
+						   end), 0) as value_as_on_from_date,
+			   ifnull(sum(case when a.purchase_date >= %(from_date)s then
+			   						a.gross_purchase_amount
 			   				   else
 			   				   		0
-			   				   end), 0) as cost_of_new_purchase,
-			   ifnull(sum(case when ifnull(disposal_date, 0) != 0
-			   						and disposal_date >= %(from_date)s
-			   						and disposal_date <= %(to_date)s then
-							   case when status = "Sold" then
-							   		gross_purchase_amount
+			   				   end), 0) as value_of_new_purchase,
+			   ifnull(sum(case when ifnull(a.disposal_date, 0) != 0
+			   						and a.disposal_date >= %(from_date)s
+			   						and a.disposal_date <= %(to_date)s then
+							   case when a.status = "Sold" then
+							   		a.gross_purchase_amount
 							   else
 							   		0
 							   end
 						   else
 								0
-						   end), 0) as cost_of_sold_asset,
-			   ifnull(sum(case when ifnull(disposal_date, 0) != 0
-			   						and disposal_date >= %(from_date)s
-			   						and disposal_date <= %(to_date)s then
-							   case when status = "Scrapped" then
-							   		gross_purchase_amount
+						   end), 0) as value_of_sold_asset,
+			   ifnull(sum(case when ifnull(a.disposal_date, 0) != 0
+			   						and a.disposal_date >= %(from_date)s
+			   						and a.disposal_date <= %(to_date)s then
+							   case when a.status = "Scrapped" then
+							   		a.gross_purchase_amount
 							   else
 							   		0
 							   end
 						   else
 								0
-						   end), 0) as cost_of_scrapped_asset
-		from `tabAsset`
-		where docstatus=1 and company=%(company)s and purchase_date <= %(to_date)s {}
-		group by name
-	""".format(
-			condition
-		),
+						   end), 0) as value_of_scrapped_asset,
+				ifnull(sum(case when ifnull(a.disposal_date, 0) != 0
+			   						and a.disposal_date >= %(from_date)s
+			   						and a.disposal_date <= %(to_date)s then
+							   case when a.status = "Capitalized" then
+							   		a.gross_purchase_amount
+							   else
+							   		0
+							   end
+						   else
+								0
+						   end), 0) as value_of_capitalized_asset
+		from `tabAsset` a
+		where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s {condition}
+		and not exists(
+				select 1 from `tabAsset Capitalization Asset Item` acai join `tabAsset Capitalization` ac on acai.parent=ac.name
+				where acai.asset = a.name
+				and ac.posting_date < %(from_date)s
+				and ac.docstatus=1
+			)
+		group by a.name
+	""",
 		{
 			"to_date": filters.to_date,
 			"from_date": filters.from_date,
 			"company": filters.company,
 			"asset": filters.get("asset"),
+			"finance_book": filters.get("finance_book"),
 		},
 		as_dict=1,
 	)
@@ -191,14 +231,14 @@ def get_group_by_asset_data(filters):
 
 	for asset_detail in asset_details:
 		row = frappe._dict()
-		# row.asset_category = asset_category
 		row.update(asset_detail)
 
-		row.cost_as_on_to_date = (
-			flt(row.cost_as_on_from_date)
-			+ flt(row.cost_of_new_purchase)
-			- flt(row.cost_of_sold_asset)
-			- flt(row.cost_of_scrapped_asset)
+		row.value_as_on_to_date = (
+			flt(row.value_as_on_from_date)
+			+ flt(row.value_of_new_purchase)
+			- flt(row.value_of_sold_asset)
+			- flt(row.value_of_scrapped_asset)
+			- flt(row.value_of_capitalized_asset)
 		)
 
 		row.update(next(asset for asset in assets if asset["asset"] == asset_detail.get("name", "")))
@@ -209,11 +249,11 @@ def get_group_by_asset_data(filters):
 			- flt(row.depreciation_eliminated_during_the_period)
 		)
 
-		row.net_asset_value_as_on_from_date = flt(row.cost_as_on_from_date) - flt(
+		row.net_asset_value_as_on_from_date = flt(row.value_as_on_from_date) - flt(
 			row.accumulated_depreciation_as_on_from_date
 		)
 
-		row.net_asset_value_as_on_to_date = flt(row.cost_as_on_to_date) - flt(
+		row.net_asset_value_as_on_to_date = flt(row.value_as_on_to_date) - flt(
 			row.accumulated_depreciation_as_on_to_date
 		)
 
@@ -225,9 +265,15 @@ def get_group_by_asset_data(filters):
 def get_assets_for_grouped_by_category(filters):
 	condition = ""
 	if filters.get("asset_category"):
-		condition = " and a.asset_category = '{}'".format(filters.get("asset_category"))
+		condition = f" and a.asset_category = '{filters.get('asset_category')}'"
+	finance_book_filter = ""
+	if filters.get("finance_book"):
+		finance_book_filter += " and ifnull(gle.finance_book, '')=%(finance_book)s"
+		condition += " and exists (select 1 from `tabAsset Depreciation Schedule` ads where ads.asset = a.name and ads.finance_book = %(finance_book)s)"
+
+	# nosemgrep
 	return frappe.db.sql(
-		"""
+		f"""
 		SELECT results.asset_category,
 			   sum(results.accumulated_depreciation_as_on_from_date) as accumulated_depreciation_as_on_from_date,
 			   sum(results.depreciation_eliminated_during_the_period) as depreciation_eliminated_during_the_period,
@@ -257,7 +303,14 @@ def get_assets_for_grouped_by_category(filters):
 				aca.parent = a.asset_category and aca.company_name = %(company)s
 			join `tabCompany` company on
 				company.name = %(company)s
-			where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s and gle.debit != 0 and gle.is_cancelled = 0 and gle.account = ifnull(aca.depreciation_expense_account, company.depreciation_expense_account) {0}
+			where
+				a.docstatus=1
+				and a.company=%(company)s
+				and a.purchase_date <= %(to_date)s
+				and gle.debit != 0
+				and gle.is_cancelled = 0
+				and gle.account = ifnull(aca.depreciation_expense_account, company.depreciation_expense_account)
+				{condition} {finance_book_filter}
 			group by a.asset_category
 			union
 			SELECT a.asset_category,
@@ -273,13 +326,16 @@ def get_assets_for_grouped_by_category(filters):
 							  end), 0) as depreciation_eliminated_during_the_period,
 				   0 as depreciation_amount_during_the_period
 			from `tabAsset` a
-			where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s {0}
+			where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s {condition}
 			group by a.asset_category) as results
 		group by results.asset_category
-		""".format(
-			condition
-		),
-		{"to_date": filters.to_date, "from_date": filters.from_date, "company": filters.company},
+		""",
+		{
+			"to_date": filters.to_date,
+			"from_date": filters.from_date,
+			"company": filters.company,
+			"finance_book": filters.get("finance_book", ""),
+		},
 		as_dict=1,
 	)
 
@@ -287,9 +343,15 @@ def get_assets_for_grouped_by_category(filters):
 def get_assets_for_grouped_by_asset(filters):
 	condition = ""
 	if filters.get("asset"):
-		condition = " and a.name = '{}'".format(filters.get("asset"))
+		condition = f" and a.name = '{filters.get('asset')}'"
+	finance_book_filter = ""
+	if filters.get("finance_book"):
+		finance_book_filter += " and ifnull(gle.finance_book, '')=%(finance_book)s"
+		condition += " and exists (select 1 from `tabAsset Depreciation Schedule` ads where ads.asset = a.name and ads.finance_book = %(finance_book)s)"
+
+	# nosemgrep
 	return frappe.db.sql(
-		"""
+		f"""
 		SELECT results.name as asset,
 			   sum(results.accumulated_depreciation_as_on_from_date) as accumulated_depreciation_as_on_from_date,
 			   sum(results.depreciation_eliminated_during_the_period) as depreciation_eliminated_during_the_period,
@@ -319,7 +381,14 @@ def get_assets_for_grouped_by_asset(filters):
 				aca.parent = a.asset_category and aca.company_name = %(company)s
 			join `tabCompany` company on
 				company.name = %(company)s
-			where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s and gle.debit != 0 and gle.is_cancelled = 0 and gle.account = ifnull(aca.depreciation_expense_account, company.depreciation_expense_account) {0}
+			where
+				a.docstatus=1
+				and a.company=%(company)s
+				and a.purchase_date <= %(to_date)s
+				and gle.debit != 0
+				and gle.is_cancelled = 0
+				and gle.account = ifnull(aca.depreciation_expense_account, company.depreciation_expense_account)
+				{finance_book_filter} {condition}
 			group by a.name
 			union
 			SELECT a.name as name,
@@ -335,13 +404,16 @@ def get_assets_for_grouped_by_asset(filters):
 							  end), 0) as depreciation_eliminated_during_the_period,
 				   0 as depreciation_amount_during_the_period
 			from `tabAsset` a
-			where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s {0}
+			where a.docstatus=1 and a.company=%(company)s and a.purchase_date <= %(to_date)s {condition}
 			group by a.name) as results
 		group by results.name
-		""".format(
-			condition
-		),
-		{"to_date": filters.to_date, "from_date": filters.from_date, "company": filters.company},
+		""",
+		{
+			"to_date": filters.to_date,
+			"from_date": filters.from_date,
+			"company": filters.company,
+			"finance_book": filters.get("finance_book", ""),
+		},
 		as_dict=1,
 	)
 
@@ -372,32 +444,38 @@ def get_columns(filters):
 
 	columns += [
 		{
-			"label": _("Cost as on") + " " + formatdate(filters.day_before_from_date),
-			"fieldname": "cost_as_on_from_date",
+			"label": _("Value as on") + " " + formatdate(filters.day_before_from_date),
+			"fieldname": "value_as_on_from_date",
 			"fieldtype": "Currency",
 			"width": 140,
 		},
 		{
-			"label": _("Cost of New Purchase"),
-			"fieldname": "cost_of_new_purchase",
+			"label": _("Value of New Purchase"),
+			"fieldname": "value_of_new_purchase",
 			"fieldtype": "Currency",
 			"width": 140,
 		},
 		{
-			"label": _("Cost of Sold Asset"),
-			"fieldname": "cost_of_sold_asset",
+			"label": _("Value of Sold Asset"),
+			"fieldname": "value_of_sold_asset",
 			"fieldtype": "Currency",
 			"width": 140,
 		},
 		{
-			"label": _("Cost of Scrapped Asset"),
-			"fieldname": "cost_of_scrapped_asset",
+			"label": _("Value of Scrapped Asset"),
+			"fieldname": "value_of_scrapped_asset",
 			"fieldtype": "Currency",
 			"width": 140,
 		},
 		{
-			"label": _("Cost as on") + " " + formatdate(filters.to_date),
-			"fieldname": "cost_as_on_to_date",
+			"label": _("Value of New Capitalized Asset"),
+			"fieldname": "value_of_capitalized_asset",
+			"fieldtype": "Currency",
+			"width": 140,
+		},
+		{
+			"label": _("Value as on") + " " + formatdate(filters.to_date),
+			"fieldname": "value_as_on_to_date",
 			"fieldtype": "Currency",
 			"width": 140,
 		},

@@ -40,7 +40,7 @@ def execute(filters=None):
 	item_balance = {}
 	item_value = {}
 
-	for (company, item, warehouse) in sorted(iwb_map):
+	for company, item, warehouse in sorted(iwb_map):
 		if not item_map.get(item):
 			continue
 
@@ -56,13 +56,14 @@ def execute(filters=None):
 		item_value.setdefault((item, item_map[item]["item_group"]), [])
 		item_value[(item, item_map[item]["item_group"])].append(total_stock_value)
 
+	itemwise_brand = frappe._dict(get_itemwise_brand(items))
 	# sum bal_qty by item
 	for (item, item_group), wh_balance in item_balance.items():
 		if not item_ageing.get(item):
 			continue
 
 		total_stock_value = sum(item_value[(item, item_group)])
-		row = [item, item_map[item]["item_name"], item_group, total_stock_value]
+		row = [item, item_map[item]["item_name"], item_group, itemwise_brand.get(item), total_stock_value]
 
 		fifo_queue = item_ageing[item]["fifo_queue"]
 		average_age = 0.00
@@ -71,7 +72,7 @@ def execute(filters=None):
 
 		row += [average_age]
 
-		bal_qty = [sum(bal_qty) for bal_qty in zip(*wh_balance)]
+		bal_qty = [sum(bal_qty) for bal_qty in zip(*wh_balance, strict=False)]
 		total_qty = sum(bal_qty)
 		if len(warehouse_list) > 1:
 			row += [total_qty]
@@ -85,6 +86,10 @@ def execute(filters=None):
 	return columns, data
 
 
+def get_itemwise_brand(items):
+	return frappe.get_all("Item", filters={"name": ("in", items)}, fields=["name", "brand"], as_list=1)
+
+
 def get_columns(filters):
 	"""return columns"""
 
@@ -92,6 +97,7 @@ def get_columns(filters):
 		_("Item") + ":Link/Item:150",
 		_("Item Name") + ":Link/Item:150",
 		_("Item Group") + "::120",
+		_("Brand") + ":Link/Brand:120",
 		_("Value") + ":Currency:120",
 		_("Age") + ":Float:120",
 	]
@@ -103,23 +109,26 @@ def validate_filters(filters):
 		sle_count = flt(frappe.qb.from_("Stock Ledger Entry").select(Count("name")).run()[0][0])
 		if sle_count > 500000:
 			frappe.throw(_("Please set filter based on Item or Warehouse"))
-	if not filters.get("company"):
-		filters["company"] = frappe.defaults.get_user_default("Company")
 
 
 def get_warehouse_list(filters):
-	from frappe.core.doctype.user_permission.user_permission import get_permitted_documents
+	if not filters.get("warehouse"):
+		return frappe.get_all(
+			"Warehouse",
+			filters={"company": filters.get("company"), "is_group": 0},
+			fields=["name"],
+			order_by="name",
+		)
 
-	wh = frappe.qb.DocType("Warehouse")
-	query = frappe.qb.from_(wh).select(wh.name).where(wh.is_group == 0)
+	warehouse = frappe.qb.DocType("Warehouse")
+	lft, rgt = frappe.db.get_value("Warehouse", filters.get("warehouse"), ["lft", "rgt"])
 
-	user_permitted_warehouse = get_permitted_documents("Warehouse")
-	if user_permitted_warehouse:
-		query = query.where(wh.name.isin(set(user_permitted_warehouse)))
-	elif filters.get("warehouse"):
-		query = query.where(wh.name == filters.get("warehouse"))
-
-	return query.run(as_dict=True)
+	return (
+		frappe.qb.from_(warehouse)
+		.select("name")
+		.where((warehouse.lft >= lft) & (warehouse.rgt <= rgt))
+		.run(as_dict=True)
+	)
 
 
 def add_warehouse_column(columns, warehouse_list):

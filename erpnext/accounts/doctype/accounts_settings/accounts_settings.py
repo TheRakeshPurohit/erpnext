@@ -10,6 +10,7 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 from frappe.model.document import Document
 from frappe.utils import cint
 
+from erpnext.accounts.utils import sync_auto_reconcile_config
 from erpnext.stock.utils import check_pending_reposting
 
 
@@ -27,27 +28,34 @@ class AccountsSettings(Document):
 		allow_multi_currency_invoices_against_single_party_account: DF.Check
 		allow_stale: DF.Check
 		auto_reconcile_payments: DF.Check
+		auto_reconciliation_job_trigger: DF.Int
 		automatically_fetch_payment_terms: DF.Check
 		automatically_process_deferred_accounting_entry: DF.Check
 		book_asset_depreciation_entry_automatically: DF.Check
 		book_deferred_entries_based_on: DF.Literal["Days", "Months"]
 		book_deferred_entries_via_journal_entry: DF.Check
 		book_tax_discount_loss: DF.Check
+		calculate_depr_using_total_days: DF.Check
 		check_supplier_invoice_uniqueness: DF.Check
+		create_pr_in_draft_status: DF.Check
 		credit_controller: DF.Link | None
 		delete_linked_ledger_entries: DF.Check
 		determine_address_tax_category_from: DF.Literal["Billing Address", "Shipping Address"]
 		enable_common_party_accounting: DF.Check
 		enable_fuzzy_matching: DF.Check
+		enable_immutable_ledger: DF.Check
 		enable_party_matching: DF.Check
+		exchange_gain_loss_posting_date: DF.Literal["Invoice", "Payment", "Reconciliation Date"]
 		frozen_accounts_modifier: DF.Link | None
 		general_ledger_remarks_length: DF.Int
 		ignore_account_closing_balance: DF.Check
+		ignore_is_opening_check_for_reporting: DF.Check
 		make_payment_via_journal_entry: DF.Check
 		merge_similar_account_heads: DF.Check
 		over_billing_allowance: DF.Currency
 		post_change_gl_entries: DF.Check
 		receivable_payable_remarks_length: DF.Int
+		reconciliation_queue_size: DF.Int
 		role_allowed_to_over_bill: DF.Link | None
 		round_row_wise_tax: DF.Check
 		show_balance_in_coa: DF.Check
@@ -87,6 +95,8 @@ class AccountsSettings(Document):
 		if clear_cache:
 			frappe.clear_cache()
 
+		self.validate_and_sync_auto_reconcile_config()
+
 	def validate_stale_days(self):
 		if not self.allow_stale and cint(self.stale_days) <= 0:
 			frappe.msgprint(
@@ -111,3 +121,17 @@ class AccountsSettings(Document):
 	def validate_pending_reposts(self):
 		if self.acc_frozen_upto:
 			check_pending_reposting(self.acc_frozen_upto)
+
+	def validate_and_sync_auto_reconcile_config(self):
+		if self.has_value_changed("auto_reconciliation_job_trigger"):
+			if (
+				cint(self.auto_reconciliation_job_trigger) > 0
+				and cint(self.auto_reconciliation_job_trigger) < 60
+			):
+				sync_auto_reconcile_config(self.auto_reconciliation_job_trigger)
+			else:
+				frappe.throw(_("Cron Interval should be between 1 and 59 Min"))
+
+		if self.has_value_changed("reconciliation_queue_size"):
+			if cint(self.reconciliation_queue_size) < 5 or cint(self.reconciliation_queue_size) > 100:
+				frappe.throw(_("Queue Size should be between 5 and 100"))

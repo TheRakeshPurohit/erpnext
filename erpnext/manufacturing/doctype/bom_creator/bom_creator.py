@@ -28,6 +28,7 @@ BOM_ITEM_FIELDS = [
 	"stock_uom",
 	"conversion_factor",
 	"do_not_explode",
+	"operation",
 ]
 
 
@@ -59,7 +60,8 @@ class BOMCreator(Document):
 		qty: DF.Float
 		raw_material_cost: DF.Currency
 		remarks: DF.TextEditor | None
-		rm_cost_as_per: DF.Literal["Valuation Rate", "Last Purchase Rate", "Price List", "Manual"]
+		rm_cost_as_per: DF.Literal["Valuation Rate", "Last Purchase Rate", "Price List"]
+		routing: DF.Link | None
 		set_rate_based_on_warehouse: DF.Check
 		status: DF.Literal["Draft", "Submitted", "In Progress", "Completed", "Failed", "Cancelled"]
 		uom: DF.Link | None
@@ -79,6 +81,18 @@ class BOMCreator(Document):
 		for row in self.items:
 			if row.is_expandable and row.item_code == self.item_code:
 				frappe.throw(_("Item {0} cannot be added as a sub-assembly of itself").format(row.item_code))
+
+			if not row.parent_row_no and row.fg_item and row.fg_item != self.item_code:
+				frappe.throw(
+					_("At row {0}: set Parent Row No for item {1}").format(row.idx, row.item_code),
+					title=_("Set Parent Row No in Items Table"),
+				)
+
+			elif row.parent_row_no and row.fg_item == self.item_code:
+				frappe.throw(
+					_("At row {0}: Parent Row No cannot be set for item {1}").format(row.idx, row.item_code),
+					title=_("Remove Parent Row No in Items Table"),
+				)
 
 	def set_status(self, save=False):
 		self.status = {
@@ -101,9 +115,7 @@ class BOMCreator(Document):
 				has_completed = False
 				break
 
-		if not frappe.get_cached_value(
-			"BOM", {"bom_creator": self.name, "item": self.item_code}, "name"
-		):
+		if not frappe.get_cached_value("BOM", {"bom_creator": self.name, "item": self.item_code}, "name"):
 			has_completed = False
 
 		if has_completed:
@@ -143,18 +155,15 @@ class BOMCreator(Document):
 		self.submit()
 
 	def set_rate_for_items(self):
-		if self.rm_cost_as_per == "Manual":
-			return
-
 		amount = self.get_raw_material_cost()
 		self.raw_material_cost = amount
 
-	def get_raw_material_cost(self, fg_reference_id=None, amount=0):
-		if not fg_reference_id:
-			fg_reference_id = self.name
+	def get_raw_material_cost(self, fg_item=None, amount=0):
+		if not fg_item:
+			fg_item = self.item_code
 
 		for row in self.items:
-			if row.fg_reference_id != fg_reference_id:
+			if row.fg_item != fg_item:
 				continue
 
 			if not row.is_expandable:
@@ -176,7 +185,7 @@ class BOMCreator(Document):
 
 			else:
 				row.amount = 0.0
-				row.amount = self.get_raw_material_cost(row.name, row.amount)
+				row.amount = self.get_raw_material_cost(row.item_code, row.amount)
 				row.rate = flt(row.amount) / (flt(row.qty) * flt(row.conversion_factor))
 
 			amount += flt(row.amount)
@@ -197,7 +206,7 @@ class BOMCreator(Document):
 
 		for field, label in fields.items():
 			if not self.get(field):
-				frappe.throw(_("Please set {0} in BOM Creator {1}").format(label, self.name))
+				frappe.throw(_("Please set {0} in BOM Creator {1}").format(_(label), self.name))
 
 	def on_submit(self):
 		self.enqueue_create_boms()
@@ -229,16 +238,22 @@ class BOMCreator(Document):
 
 		self.db_set("status", "In Progress")
 		production_item_wise_rm = OrderedDict({})
+
+		final_product = (self.item_code, self.name)
 		production_item_wise_rm.setdefault(
-			(self.item_code, self.name), frappe._dict({"items": [], "bom_no": "", "fg_item_data": self})
+			final_product, frappe._dict({"items": [], "bom_no": "", "fg_item_data": self})
 		)
 
 		for row in self.items:
 			if row.is_expandable:
 				if (row.item_code, row.name) not in production_item_wise_rm:
 					production_item_wise_rm.setdefault(
-						(row.item_code, row.name), frappe._dict({"items": [], "bom_no": "", "fg_item_data": row})
+						(row.item_code, row.name),
+						frappe._dict({"items": [], "bom_no": "", "fg_item_data": row}),
 					)
+
+			if not row.fg_reference_id and production_item_wise_rm.get((row.fg_item, row.fg_reference_id)):
+				frappe.throw(_("Please set Parent Row No for item {0}").format(row.fg_item))
 
 			production_item_wise_rm[(row.fg_item, row.fg_reference_id)]["items"].append(row)
 
@@ -283,9 +298,13 @@ class BOMCreator(Document):
 				"allow_alternative_item": 1,
 				"bom_creator": self.name,
 				"bom_creator_item": bom_creator_item,
-				"rm_cost_as_per": "Manual",
 			}
 		)
+
+		if row.item_code == self.item_code and (self.routing or self.has_operations()):
+			bom.routing = self.routing
+			bom.with_operations = 1
+			bom.transfer_material_against = "Work Order"
 
 		for field in BOM_FIELDS:
 			if self.get(field):
@@ -318,6 +337,13 @@ class BOMCreator(Document):
 
 		production_item_wise_rm[(row.item_code, row.name)].bom_no = bom.name
 
+	def has_operations(self):
+		for row in self.items:
+			if row.operation:
+				return True
+
+		return False
+
 	@frappe.whitelist()
 	def get_default_bom(self, item_code) -> str:
 		return frappe.get_cached_value("Item", item_code, "default_bom")
@@ -342,6 +368,16 @@ def get_children(doctype=None, parent=None, **kwargs):
 		"uom",
 		"rate",
 		"amount",
+		"workstation_type",
+		"operation",
+		"operation_time",
+		"is_subcontracted",
+		"workstation",
+		"source_warehouse",
+		"wip_warehouse",
+		"fg_warehouse",
+		"skip_material_transfer",
+		"backflush_from_wip_warehouse",
 	]
 
 	query_filters = {
@@ -365,6 +401,11 @@ def add_item(**kwargs):
 
 	doc = frappe.get_doc("BOM Creator", kwargs.parent)
 	item_info = get_item_details(kwargs.item_code)
+
+	parent_row_no = ""
+	if kwargs.fg_reference_id and doc.name != kwargs.fg_reference_id:
+		parent_row_no = get_parent_row_no(doc, kwargs.fg_reference_id)
+
 	kwargs.update(
 		{
 			"uom": item_info.stock_uom,
@@ -372,6 +413,9 @@ def add_item(**kwargs):
 			"conversion_factor": 1,
 		}
 	)
+
+	if parent_row_no:
+		kwargs.update({"parent_row_no": parent_row_no})
 
 	doc.append("items", kwargs)
 	doc.save()
@@ -392,8 +436,11 @@ def add_sub_assembly(**kwargs):
 
 	name = kwargs.fg_reference_id
 	parent_row_no = ""
+
 	if not kwargs.convert_to_sub_assembly:
 		item_info = get_item_details(bom_item.item_code)
+		parent_row_no = get_parent_row_no(doc, kwargs.fg_reference_id)
+
 		item_row = doc.append(
 			"items",
 			{
@@ -402,17 +449,20 @@ def add_sub_assembly(**kwargs):
 				"uom": item_info.stock_uom,
 				"fg_item": kwargs.fg_item,
 				"conversion_factor": 1,
+				"parent_row_no": parent_row_no,
 				"fg_reference_id": name,
 				"stock_qty": bom_item.qty,
-				"fg_reference_id": name,
 				"do_not_explode": 1,
 				"is_expandable": 1,
 				"stock_uom": item_info.stock_uom,
+				"operation": bom_item.operation,
 			},
 		)
 
 		parent_row_no = item_row.idx
 		name = ""
+	else:
+		parent_row_no = get_parent_row_no(doc, kwargs.fg_reference_id)
 
 	for row in bom_item.get("items"):
 		row = frappe._dict(row)
@@ -422,6 +472,7 @@ def add_sub_assembly(**kwargs):
 			{
 				"item_code": row.item_code,
 				"qty": row.qty,
+				"operation": row.operation,
 				"fg_item": bom_item.item_code,
 				"uom": item_info.stock_uom,
 				"fg_reference_id": name,
@@ -442,6 +493,14 @@ def get_item_details(item_code):
 	return frappe.get_cached_value(
 		"Item", item_code, ["item_name", "description", "image", "stock_uom", "default_bom"], as_dict=1
 	)
+
+
+def get_parent_row_no(doc, name):
+	for row in doc.items:
+		if row.name == name:
+			return row.idx
+
+	frappe.msgprint(_("Parent Row No not found for {0}").format(name))
 
 
 @frappe.whitelist()
@@ -469,10 +528,16 @@ def delete_node(**kwargs):
 
 
 @frappe.whitelist()
-def edit_qty(doctype, docname, qty, parent):
-	frappe.db.set_value(doctype, docname, "qty", qty)
+def edit_bom_creator(doctype, docname, data, parent):
+	if isinstance(data, str):
+		data = frappe.parse_json(data)
+
+	frappe.db.set_value(doctype, docname, data)
+
 	doc = frappe.get_doc("BOM Creator", parent)
 	doc.set_rate_for_items()
 	doc.save()
+
+	frappe.msgprint(_("Updated successfully"), alert=True)
 
 	return doc

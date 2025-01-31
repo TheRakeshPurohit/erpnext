@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import frappe
-from frappe import _
 from frappe.desk.doctype.global_search_settings.global_search_settings import (
 	update_global_search_doctypes,
 )
@@ -16,6 +15,14 @@ from frappe.utils import cstr, getdate
 
 from erpnext.accounts.doctype.account.account import RootNotEditable
 from erpnext.regional.address_template.setup import set_up_address_templates
+
+
+def _(x, *args, **kwargs):
+	"""Redefine the translation function to return the string as is.
+
+	We want to create english records but still mark the strings as translatable.
+	The respective DocTypes have 'Translate Link Fields' enabled."""
+	return x
 
 
 def read_lines(filename: str) -> list[str]:
@@ -66,29 +73,54 @@ def install(country=None):
 			"parent_item_group": _("All Item Groups"),
 		},
 		# Stock Entry Type
-		{"doctype": "Stock Entry Type", "name": "Material Issue", "purpose": "Material Issue"},
-		{"doctype": "Stock Entry Type", "name": "Material Receipt", "purpose": "Material Receipt"},
 		{
 			"doctype": "Stock Entry Type",
-			"name": "Material Transfer",
+			"name": _("Material Issue"),
+			"purpose": "Material Issue",
+			"is_standard": 1,
+		},
+		{
+			"doctype": "Stock Entry Type",
+			"name": _("Material Receipt"),
+			"purpose": "Material Receipt",
+			"is_standard": 1,
+		},
+		{
+			"doctype": "Stock Entry Type",
+			"name": _("Material Transfer"),
 			"purpose": "Material Transfer",
+			"is_standard": 1,
 		},
-		{"doctype": "Stock Entry Type", "name": "Manufacture", "purpose": "Manufacture"},
-		{"doctype": "Stock Entry Type", "name": "Repack", "purpose": "Repack"},
 		{
 			"doctype": "Stock Entry Type",
-			"name": "Send to Subcontractor",
+			"name": _("Manufacture"),
+			"purpose": "Manufacture",
+			"is_standard": 1,
+		},
+		{
+			"doctype": "Stock Entry Type",
+			"name": _("Repack"),
+			"purpose": "Repack",
+			"is_standard": 1,
+		},
+		{"doctype": "Stock Entry Type", "name": "Disassemble", "purpose": "Disassemble", "is_standard": 1},
+		{
+			"doctype": "Stock Entry Type",
+			"name": _("Send to Subcontractor"),
 			"purpose": "Send to Subcontractor",
+			"is_standard": 1,
 		},
 		{
 			"doctype": "Stock Entry Type",
-			"name": "Material Transfer for Manufacture",
+			"name": _("Material Transfer for Manufacture"),
 			"purpose": "Material Transfer for Manufacture",
+			"is_standard": 1,
 		},
 		{
 			"doctype": "Stock Entry Type",
-			"name": "Material Consumption for Manufacture",
+			"name": _("Material Consumption for Manufacture"),
 			"purpose": "Material Consumption for Manufacture",
+			"is_standard": 1,
 		},
 		# territory: with two default territories, one for home country and one named Rest of the World
 		{
@@ -250,9 +282,9 @@ def install(country=None):
 		{"doctype": "Opportunity Type", "name": _("Sales")},
 		{"doctype": "Opportunity Type", "name": _("Support")},
 		{"doctype": "Opportunity Type", "name": _("Maintenance")},
-		{"doctype": "Project Type", "project_type": "Internal"},
-		{"doctype": "Project Type", "project_type": "External"},
-		{"doctype": "Project Type", "project_type": "Other"},
+		{"doctype": "Project Type", "project_type": _("Internal")},
+		{"doctype": "Project Type", "project_type": _("External")},
+		{"doctype": "Project Type", "project_type": _("Other")},
 		{"doctype": "Print Heading", "print_heading": _("Credit Note")},
 		{"doctype": "Print Heading", "print_heading": _("Debit Note")},
 		# Share Management
@@ -270,15 +302,13 @@ def install(country=None):
 		("Designation", "designation_name", "designation.txt"),
 		("Sales Stage", "stage_name", "sales_stage.txt"),
 		("Industry Type", "industry", "industry_type.txt"),
-		("Lead Source", "source_name", "lead_source.txt"),
+		("UTM Source", "name", "marketing_source.txt"),
 		("Sales Partner Type", "sales_partner_type", "sales_partner_type.txt"),
 	):
 		records += [{"doctype": doctype, title_field: title} for title in read_lines(filename)]
 
 	base_path = frappe.get_app_path("erpnext", "stock", "doctype")
-	response = frappe.read_file(
-		os.path.join(base_path, "delivery_trip/dispatch_notification_template.html")
-	)
+	response = frappe.read_file(os.path.join(base_path, "delivery_trip/dispatch_notification_template.html"))
 
 	records += [
 		{
@@ -336,16 +366,10 @@ def add_uom_data():
 		open(frappe.get_app_path("erpnext", "setup", "setup_wizard", "data", "uom_data.json")).read()
 	)
 	for d in uoms:
-		if not frappe.db.exists("UOM", _(d.get("uom_name"))):
-			frappe.get_doc(
-				{
-					"doctype": "UOM",
-					"uom_name": _(d.get("uom_name")),
-					"name": _(d.get("uom_name")),
-					"must_be_whole_number": d.get("must_be_whole_number"),
-					"enabled": 1,
-				}
-			).db_insert()
+		if not frappe.db.exists("UOM", d.get("uom_name")):
+			doc = frappe.new_doc("UOM")
+			doc.update(d)
+			doc.save()
 
 	# bootstrap uom conversion factors
 	uom_conversions = json.loads(
@@ -354,19 +378,19 @@ def add_uom_data():
 		).read()
 	)
 	for d in uom_conversions:
-		if not frappe.db.exists("UOM Category", _(d.get("category"))):
-			frappe.get_doc({"doctype": "UOM Category", "category_name": _(d.get("category"))}).db_insert()
+		if not frappe.db.exists("UOM Category", d.get("category")):
+			frappe.get_doc({"doctype": "UOM Category", "category_name": d.get("category")}).db_insert()
 
 		if not frappe.db.exists(
 			"UOM Conversion Factor",
-			{"from_uom": _(d.get("from_uom")), "to_uom": _(d.get("to_uom"))},
+			{"from_uom": d.get("from_uom"), "to_uom": d.get("to_uom")},
 		):
 			frappe.get_doc(
 				{
 					"doctype": "UOM Conversion Factor",
-					"category": _(d.get("category")),
-					"from_uom": _(d.get("from_uom")),
-					"to_uom": _(d.get("to_uom")),
+					"category": d.get("category"),
+					"from_uom": d.get("from_uom"),
+					"to_uom": d.get("to_uom"),
 					"value": d.get("value"),
 				}
 			).db_insert()
@@ -477,10 +501,8 @@ def update_stock_settings():
 	stock_settings = frappe.get_doc("Stock Settings")
 	stock_settings.item_naming_by = "Item Code"
 	stock_settings.valuation_method = "FIFO"
-	stock_settings.default_warehouse = frappe.db.get_value(
-		"Warehouse", {"warehouse_name": _("Stores")}
-	)
-	stock_settings.stock_uom = _("Nos")
+	stock_settings.default_warehouse = frappe.db.get_value("Warehouse", {"warehouse_name": _("Stores")})
+	stock_settings.stock_uom = "Nos"
 	stock_settings.auto_indent = 1
 	stock_settings.auto_insert_price_list_rate_if_missing = 1
 	stock_settings.set_qty_in_transactions_based_on_serial_no_input = 1

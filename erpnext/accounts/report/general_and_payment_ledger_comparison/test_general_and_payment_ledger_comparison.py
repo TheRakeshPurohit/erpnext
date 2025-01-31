@@ -1,8 +1,6 @@
-import unittest
-
 import frappe
 from frappe import qb
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days
 
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
@@ -12,7 +10,7 @@ from erpnext.accounts.report.general_and_payment_ledger_comparison.general_and_p
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 
 
-class TestGeneralAndPaymentLedger(FrappeTestCase, AccountsTestMixin):
+class TestGeneralAndPaymentLedger(IntegrationTestCase, AccountsTestMixin):
 	def setUp(self):
 		self.create_company()
 		self.cleanup()
@@ -40,9 +38,7 @@ class TestGeneralAndPaymentLedger(FrappeTestCase, AccountsTestMixin):
 		)
 
 		# manually edit the payment ledger entry
-		ple = frappe.db.get_all(
-			"Payment Ledger Entry", filters={"voucher_no": sinv.name, "delinked": 0}
-		)[0]
+		ple = frappe.db.get_all("Payment Ledger Entry", filters={"voucher_no": sinv.name, "delinked": 0})[0]
 		frappe.db.set_value("Payment Ledger Entry", ple.name, "amount", sinv.grand_total - 1)
 
 		filters = frappe._dict({"company": self.company})

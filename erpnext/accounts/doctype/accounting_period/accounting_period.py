@@ -84,7 +84,10 @@ class AccountingPeriod(Document):
 			for doctype_for_closing in self.get_doctypes_for_closing():
 				self.append(
 					"closed_documents",
-					{"document_type": doctype_for_closing.document_type, "closed": doctype_for_closing.closed},
+					{
+						"document_type": doctype_for_closing.document_type,
+						"closed": doctype_for_closing.closed,
+					},
 				)
 
 
@@ -98,6 +101,8 @@ def validate_accounting_period_on_doc_save(doc, method=None):
 			date = doc.available_for_use_date
 	elif doc.doctype == "Asset Repair":
 		date = doc.completion_date
+	elif doc.doctype == "Period Closing Voucher":
+		date = doc.period_end_date
 	else:
 		date = doc.posting_date
 

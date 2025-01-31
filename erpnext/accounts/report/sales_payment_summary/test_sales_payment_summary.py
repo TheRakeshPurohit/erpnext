@@ -1,10 +1,9 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
-
-
 import unittest
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
 from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
@@ -13,12 +12,13 @@ from erpnext.accounts.report.sales_payment_summary.sales_payment_summary import 
 	get_mode_of_payments,
 )
 
-test_dependencies = ["Sales Invoice"]
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Sales Invoice"]
 
 
-class TestSalesPaymentSummary(unittest.TestCase):
+class TestSalesPaymentSummary(IntegrationTestCase):
 	@classmethod
-	def setUpClass(self):
+	def setUpClass(cls):
+		super().setUpClass()
 		create_records()
 		pes = frappe.get_all("Payment Entry")
 		jes = frappe.get_all("Journal Entry")
@@ -33,7 +33,7 @@ class TestSalesPaymentSummary(unittest.TestCase):
 	def test_get_mode_of_payments(self):
 		filters = get_filters()
 
-		for dummy in range(2):
+		for _dummy in range(2):
 			si = create_sales_invoice_record()
 			si.insert()
 			si.submit()
@@ -53,8 +53,8 @@ class TestSalesPaymentSummary(unittest.TestCase):
 			pe.submit()
 
 		mop = get_mode_of_payments(filters)
-		self.assertTrue("Credit Card" in list(mop.values())[0])
-		self.assertTrue("Cash" in list(mop.values())[0])
+		self.assertTrue("Credit Card" in next(iter(mop.values())))
+		self.assertTrue("Cash" in next(iter(mop.values())))
 
 		# Cancel all Cash payment entry and check if this mode of payment is still fetched.
 		payment_entries = frappe.get_all(
@@ -67,13 +67,13 @@ class TestSalesPaymentSummary(unittest.TestCase):
 			pe.cancel()
 
 		mop = get_mode_of_payments(filters)
-		self.assertTrue("Credit Card" in list(mop.values())[0])
-		self.assertTrue("Cash" not in list(mop.values())[0])
+		self.assertTrue("Credit Card" in next(iter(mop.values())))
+		self.assertTrue("Cash" not in next(iter(mop.values())))
 
 	def test_get_mode_of_payments_details(self):
 		filters = get_filters()
 
-		for dummy in range(2):
+		for _dummy in range(2):
 			si = create_sales_invoice_record()
 			si.insert()
 			si.submit()
@@ -94,7 +94,7 @@ class TestSalesPaymentSummary(unittest.TestCase):
 
 		mopd = get_mode_of_payment_details(filters)
 
-		mopd_values = list(mopd.values())[0]
+		mopd_values = next(iter(mopd.values()))
 		for mopd_value in mopd_values:
 			if mopd_value[0] == "Credit Card":
 				cc_init_amount = mopd_value[1]
@@ -110,7 +110,7 @@ class TestSalesPaymentSummary(unittest.TestCase):
 			pe.cancel()
 
 		mopd = get_mode_of_payment_details(filters)
-		mopd_values = list(mopd.values())[0]
+		mopd_values = next(iter(mopd.values()))
 		for mopd_value in mopd_values:
 			if mopd_value[0] == "Credit Card":
 				cc_final_amount = mopd_value[1]
