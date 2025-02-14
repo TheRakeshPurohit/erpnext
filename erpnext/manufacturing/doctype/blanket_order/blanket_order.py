@@ -31,6 +31,8 @@ class BlanketOrder(Document):
 		from_date: DF.Date
 		items: DF.Table[BlanketOrderItem]
 		naming_series: DF.Literal["MFG-BLR-.YYYY.-"]
+		order_date: DF.Date | None
+		order_no: DF.Data | None
 		supplier: DF.Link | None
 		supplier_name: DF.Data | None
 		tc_name: DF.Link | None
@@ -41,10 +43,49 @@ class BlanketOrder(Document):
 	def validate(self):
 		self.validate_dates()
 		self.validate_duplicate_items()
+		self.validate_item_qty()
+		self.set_party_item_code()
 
 	def validate_dates(self):
 		if getdate(self.from_date) > getdate(self.to_date):
 			frappe.throw(_("From date cannot be greater than To date"))
+
+	def set_party_item_code(self):
+		item_ref = {}
+		if self.blanket_order_type == "Selling":
+			item_ref = self.get_customer_items_ref()
+		else:
+			item_ref = self.get_supplier_items_ref()
+
+		if not item_ref:
+			return
+
+		for row in self.items:
+			row.party_item_code = item_ref.get(row.item_code)
+
+	def get_customer_items_ref(self):
+		items = [d.item_code for d in self.items]
+
+		return frappe._dict(
+			frappe.get_all(
+				"Item Customer Detail",
+				filters={"parent": ("in", items), "customer_name": self.customer},
+				fields=["parent", "ref_code"],
+				as_list=True,
+			)
+		)
+
+	def get_supplier_items_ref(self):
+		items = [d.item_code for d in self.items]
+
+		return frappe._dict(
+			frappe.get_all(
+				"Item Supplier",
+				filters={"parent": ("in", items), "supplier": self.supplier},
+				fields=["parent", "supplier_part_no"],
+				as_list=True,
+			)
+		)
 
 	def validate_duplicate_items(self):
 		item_list = []
@@ -77,6 +118,11 @@ class BlanketOrder(Document):
 		for d in self.items:
 			d.db_set("ordered_qty", item_ordered_qty.get(d.item_code, 0))
 
+	def validate_item_qty(self):
+		for d in self.items:
+			if d.qty < 0:
+				frappe.throw(_("Row {0}: Quantity cannot be negative.").format(d.idx))
+
 
 @frappe.whitelist()
 def make_order(source_name):
@@ -90,6 +136,7 @@ def make_order(source_name):
 	def update_item(source, target, source_parent):
 		target_qty = source.get("qty") - source.get("ordered_qty")
 		target.qty = target_qty if flt(target_qty) >= 0 else 0
+		target.rate = source.get("rate")
 		item = get_item_defaults(target.item_code, source_parent.company)
 		if item:
 			target.item_name = item.get("item_name")
@@ -107,10 +154,14 @@ def make_order(source_name):
 				"doctype": doctype + " Item",
 				"field_map": {"rate": "blanket_order_rate", "parent": "blanket_order"},
 				"postprocess": update_item,
-				"condition": lambda item: (flt(item.qty) - flt(item.ordered_qty)) > 0,
+				"condition": lambda item: not (flt(item.qty)) or (flt(item.qty) - flt(item.ordered_qty)) > 0,
 			},
 		},
 	)
+
+	if target_doc.doctype == "Purchase Order":
+		target_doc.set_missing_values()
+
 	return target_doc
 
 
@@ -141,9 +192,9 @@ def validate_against_blanket_order(order_doc):
 					if item.item_code in item_data:
 						remaining_qty = item.qty - item.ordered_qty
 						allowed_qty = remaining_qty + (remaining_qty * (allowance / 100))
-						if allowed_qty < item_data[item.item_code]:
+						if item.qty and allowed_qty < item_data[item.item_code]:
 							frappe.throw(
-								_("Item {0} cannot be ordered more than {1} against Blanket Order {2}.").format(
-									item.item_code, allowed_qty, bo_name
-								)
+								_(
+									"Item {0} cannot be ordered more than {1} against Blanket Order {2}."
+								).format(item.item_code, allowed_qty, bo_name)
 							)

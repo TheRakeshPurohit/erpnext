@@ -38,7 +38,8 @@
    "in_list_view": 1,
    "label": "Item Code",
    "options": "Item",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "item_name",
@@ -53,7 +54,8 @@
    "in_standard_filter": 1,
    "label": "For Warehouse",
    "options": "Warehouse",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "columns": 1,
@@ -61,7 +63,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Type",
-   "options": "\nPurchase\nMaterial Transfer\nMaterial Issue\nManufacture\nCustomer Provided"
+   "options": "\nPurchase\nMaterial Transfer\nMaterial Issue\nManufacture\nSubcontracting\nCustomer Provided"
   },
   {
    "fieldname": "column_break_4",
@@ -113,9 +115,12 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
+   "default": "0",
    "fieldname": "requested_qty",
    "fieldtype": "Float",
    "label": "Requested Qty",
+   "no_copy": 1,
    "read_only": 1
   },
   {
@@ -141,7 +146,8 @@
    "fieldname": "from_warehouse",
    "fieldtype": "Link",
    "label": "From Warehouse",
-   "options": "Warehouse"
+   "options": "Warehouse",
+   "search_index": 1
   },
   {
    "fetch_from": "item_code.safety_stock",
@@ -199,14 +205,14 @@
  ],
  "istable": 1,
  "links": [],
- "modified": "2023-09-12 12:09:08.358326",
+ "modified": "2024-12-30 18:06:22.288340",
  "modified_by": "Administrator",
  "module": "Manufacturing",
  "name": "Material Request Plan Item",
  "owner": "Administrator",
  "permissions": [],
  "quick_entry": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1

@@ -2,14 +2,12 @@
 # License: GNU General Public License v3. See license.txt
 
 
-import click
 import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.desk.page.setup_wizard.setup_wizard import add_all_roles_to
 from frappe.utils import cint
 
-import erpnext
 from erpnext.setup.default_energy_point_rules import get_default_energy_point_rules
 from erpnext.setup.doctype.incoterm.incoterm import create_incoterms
 
@@ -20,9 +18,12 @@ default_mail_footer = """<div style="padding: 7px; text-align: right; color: #88
 
 
 def after_install():
-	frappe.get_doc({"doctype": "Role", "role_name": "Analytics"}).insert()
+	if not frappe.db.exists("Role", "Analytics"):
+		frappe.get_doc({"doctype": "Role", "role_name": "Analytics"}).insert()
+
 	set_single_defaults()
 	create_print_setting_custom_fields()
+	create_marketgin_campagin_custom_fields()
 	add_all_roles_to("Administrator")
 	create_default_success_action()
 	create_default_energy_point_rules()
@@ -32,6 +33,7 @@ def after_install():
 	add_standard_navbar_items()
 	add_app_name()
 	update_roles()
+	make_default_operations()
 	frappe.db.commit()
 
 
@@ -42,23 +44,12 @@ You can reinstall this site (after saving your data) using: bench --site [sitena
 		frappe.throw(message)  # nosemgrep
 
 
-def check_frappe_version():
-	def major_version(v: str) -> str:
-		return v.split(".")[0]
-
-	frappe_version = major_version(frappe.__version__)
-	erpnext_version = major_version(erpnext.__version__)
-
-	if frappe_version == erpnext_version:
-		return
-
-	click.secho(
-		f"You're attempting to install ERPNext version {erpnext_version} with Frappe version {frappe_version}. "
-		"This is not supported and will result in broken install. Switch to correct branch before installing.",
-		fg="red",
-	)
-
-	raise SystemExit(1)
+def make_default_operations():
+	for operation in ["Assembly"]:
+		if not frappe.db.exists("Operation", operation):
+			doc = frappe.get_doc({"doctype": "Operation", "name": operation})
+			doc.flags.ignore_mandatory = True
+			doc.insert(ignore_permissions=True)
 
 
 def set_single_defaults():
@@ -93,7 +84,7 @@ def setup_currency_exchange():
 		ces.set("result_key", [])
 		ces.set("req_params", [])
 
-		ces.api_endpoint = "https://frankfurter.app/{transaction_date}"
+		ces.api_endpoint = "https://api.frankfurter.app/{transaction_date}"
 		ces.append("result_key", {"key": "rates"})
 		ces.append("result_key", {"key": "{to_currency}"})
 		ces.append("req_params", {"key": "base", "value": "{from_currency}"})
@@ -133,6 +124,22 @@ def create_print_setting_custom_fields():
 	)
 
 
+def create_marketgin_campagin_custom_fields():
+	create_custom_fields(
+		{
+			"UTM Campaign": [
+				{
+					"label": _("Messaging CRM Campagin"),
+					"fieldname": "crm_campaign",
+					"fieldtype": "Link",
+					"options": "Campaign",
+					"insert_after": "campaign_decription",
+				},
+			]
+		}
+	)
+
+
 def create_default_success_action():
 	for success_action in get_default_success_action():
 		if not frappe.db.exists("Success Action", success_action.get("ref_doctype")):
@@ -141,7 +148,6 @@ def create_default_success_action():
 
 
 def create_default_energy_point_rules():
-
 	for rule in get_default_energy_point_rules():
 		# check if any rule for ref. doctype exists
 		rule_exists = frappe.db.exists(
@@ -161,6 +167,11 @@ def add_company_to_session_defaults():
 
 def add_standard_navbar_items():
 	navbar_settings = frappe.get_single("Navbar Settings")
+
+	# Translatable strings for below navbar items
+	__ = _("Documentation")
+	__ = _("User Forum")
+	__ = _("Report an Issue")
 
 	erpnext_navbar_items = [
 		{

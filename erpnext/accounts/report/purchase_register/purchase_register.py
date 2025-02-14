@@ -311,21 +311,18 @@ def get_account_columns(invoice_list, include_payments):
 			"""select distinct expense_account
 			from `tabPurchase Invoice Item` where docstatus = 1
 			and (expense_account is not null and expense_account != '')
+			and parenttype='Purchase Invoice'
 			and parent in (%s) order by expense_account"""
 			% ", ".join(["%s"] * len(invoice_list)),
 			tuple([inv.name for inv in invoice_list]),
 		)
 
-		purchase_taxes_query = get_taxes_query(
-			invoice_list, "Purchase Taxes and Charges", "Purchase Invoice"
-		)
+		purchase_taxes_query = get_taxes_query(invoice_list, "Purchase Taxes and Charges", "Purchase Invoice")
 		purchase_tax_accounts = purchase_taxes_query.run(as_dict=True, pluck="account_head")
 		tax_accounts = purchase_tax_accounts
 
 		if include_payments:
-			advance_taxes_query = get_taxes_query(
-				invoice_list, "Advance Taxes and Charges", "Payment Entry"
-			)
+			advance_taxes_query = get_taxes_query(invoice_list, "Advance Taxes and Charges", "Payment Entry")
 			advance_tax_accounts = advance_taxes_query.run(as_dict=True, pluck="account_head")
 			tax_accounts = set(tax_accounts + advance_tax_accounts)
 
@@ -399,7 +396,7 @@ def get_invoices(filters, additional_query_columns):
 			pi.outstanding_amount,
 			pi.mode_of_payment,
 		)
-		.where((pi.docstatus == 1))
+		.where(pi.docstatus == 1)
 		.orderby(pi.posting_date, pi.name, order=Order.desc)
 	)
 
@@ -443,9 +440,7 @@ def get_payments(filters):
 		account_fieldname="paid_to",
 		party="supplier",
 		party_name="supplier_name",
-		party_account=get_party_account(
-			"Supplier", filters.supplier, filters.company, include_advance=True
-		),
+		party_account=get_party_account("Supplier", filters.supplier, filters.company, include_advance=True),
 	)
 	payment_entries = get_payment_entries(filters, args)
 	journal_entries = get_journal_entries(filters, args)
@@ -457,7 +452,7 @@ def get_invoice_expense_map(invoice_list):
 		"""
 		select parent, expense_account, sum(base_net_amount) as amount
 		from `tabPurchase Invoice Item`
-		where parent in (%s)
+		where parent in (%s) and parenttype='Purchase Invoice'
 		group by parent, expense_account
 	"""
 		% ", ".join(["%s"] * len(invoice_list)),
@@ -491,9 +486,7 @@ def get_internal_invoice_map(invoice_list):
 	return internal_invoice_map
 
 
-def get_invoice_tax_map(
-	invoice_list, invoice_expense_map, expense_accounts, include_payments=False
-):
+def get_invoice_tax_map(invoice_list, invoice_expense_map, expense_accounts, include_payments=False):
 	tax_details = frappe.db.sql(
 		"""
 		select parent, account_head, case add_deduct_tax when "Add" then sum(base_tax_amount_after_discount_amount)
@@ -530,7 +523,7 @@ def get_invoice_po_pr_map(invoice_list):
 		"""
 		select parent, purchase_order, purchase_receipt, po_detail, project
 		from `tabPurchase Invoice Item`
-		where parent in (%s)
+		where parent in (%s) and parenttype='Purchase Invoice'
 	"""
 		% ", ".join(["%s"] * len(invoice_list)),
 		tuple(inv.name for inv in invoice_list),
@@ -558,9 +551,7 @@ def get_invoice_po_pr_map(invoice_list):
 			invoice_po_pr_map.setdefault(d.parent, frappe._dict()).setdefault("purchase_receipt", pr_list)
 
 		if d.project:
-			invoice_po_pr_map.setdefault(d.parent, frappe._dict()).setdefault("project", []).append(
-				d.project
-			)
+			invoice_po_pr_map.setdefault(d.parent, frappe._dict()).setdefault("project", []).append(d.project)
 
 	return invoice_po_pr_map
 

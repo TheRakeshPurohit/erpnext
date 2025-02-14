@@ -1,8 +1,6 @@
-import unittest
-
 import frappe
 from frappe import qb
-from frappe.tests.utils import FrappeTestCase, change_settings
+from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
 from erpnext.accounts.doctype.account.test_account import create_account
@@ -13,14 +11,10 @@ from erpnext.accounts.report.deferred_revenue_and_expense.deferred_revenue_and_e
 )
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 from erpnext.accounts.utils import get_fiscal_year
-from erpnext.buying.doctype.supplier.test_supplier import create_supplier
-from erpnext.stock.doctype.item.test_item import create_item
 
 
-class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
-	@classmethod
-	def setUpClass(self):
-		self.maxDiff = None
+class TestDeferredRevenueAndExpense(IntegrationTestCase, AccountsTestMixin):
+	maxDiff = None
 
 	def clear_old_entries(self):
 		sinv = qb.DocType("Sales Invoice")
@@ -76,7 +70,7 @@ class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
 	def tearDown(self):
 		frappe.db.rollback()
 
-	@change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
+	@IntegrationTestCase.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
 	def test_deferred_revenue(self):
 		self.create_item("_Test Internet Subscription", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
@@ -145,7 +139,7 @@ class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
 		]
 		self.assertEqual(report.period_total, expected)
 
-	@change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
+	@IntegrationTestCase.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
 	def test_deferred_expense(self):
 		self.create_item("_Test Office Desk", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
@@ -217,7 +211,7 @@ class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
 		]
 		self.assertEqual(report.period_total, expected)
 
-	@change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
+	@IntegrationTestCase.change_settings("Accounts Settings", {"book_deferred_entries_based_on": "Months"})
 	def test_zero_months(self):
 		self.create_item("_Test Internet Subscription", 0, self.warehouse, self.company)
 		item = frappe.get_doc("Item", self.item)
@@ -283,3 +277,79 @@ class TestDeferredRevenueAndExpense(FrappeTestCase, AccountsTestMixin):
 			{"key": "aug_2021", "total": 0, "actual": 0},
 		]
 		self.assertEqual(report.period_total, expected)
+
+	@IntegrationTestCase.change_settings(
+		"Accounts Settings",
+		{"book_deferred_entries_based_on": "Months", "book_deferred_entries_via_journal_entry": 0},
+	)
+	def test_zero_amount(self):
+		self.create_item("_Test Office Desk", 0, self.warehouse, self.company)
+		item = frappe.get_doc("Item", self.item)
+		item.enable_deferred_expense = 1
+		item.item_defaults[0].deferred_expense_account = self.deferred_expense_account
+		item.no_of_months_exp = 12
+		item.save()
+
+		pi = make_purchase_invoice(
+			item=self.item,
+			company=self.company,
+			supplier=self.supplier,
+			is_return=False,
+			update_stock=False,
+			posting_date=frappe.utils.datetime.date(2021, 12, 30),
+			parent_cost_center=self.cost_center,
+			cost_center=self.cost_center,
+			do_not_save=True,
+			rate=3910,
+			price_list_rate=3910,
+			warehouse=self.warehouse,
+			qty=1,
+		)
+		pi.set_posting_time = True
+		pi.items[0].enable_deferred_expense = 1
+		pi.items[0].service_start_date = "2021-12-30"
+		pi.items[0].service_end_date = "2022-12-30"
+		pi.items[0].deferred_expense_account = self.deferred_expense_account
+		pi.items[0].expense_account = self.expense_account
+		pi.save()
+		pi.submit()
+
+		pda = frappe.get_doc(
+			doctype="Process Deferred Accounting",
+			posting_date=nowdate(),
+			start_date="2022-01-01",
+			end_date="2022-01-31",
+			type="Expense",
+			company=self.company,
+		)
+		pda.insert()
+		pda.submit()
+
+		# execute report
+		fiscal_year = frappe.get_doc("Fiscal Year", get_fiscal_year(date="2022-01-31"))
+		self.filters = frappe._dict(
+			{
+				"company": self.company,
+				"filter_based_on": "Date Range",
+				"period_start_date": "2022-01-01",
+				"period_end_date": "2022-01-31",
+				"from_fiscal_year": fiscal_year.year,
+				"to_fiscal_year": fiscal_year.year,
+				"periodicity": "Monthly",
+				"type": "Expense",
+				"with_upcoming_postings": False,
+			}
+		)
+
+		report = Deferred_Revenue_and_Expense_Report(filters=self.filters)
+		report.run()
+
+		# fetch the invoice from deferred invoices list
+		inv = [d for d in report.deferred_invoices if d.name == pi.name]
+		# make sure the list isn't empty
+		self.assertTrue(inv)
+		# calculate the total deferred expense for the period
+		inv = inv[0].calculate_invoice_revenue_expense_for_period()
+		deferred_exp = sum([inv[idx].actual for idx in range(len(report.period_list))])
+		# make sure the total deferred expense is greater than 0
+		self.assertLess(deferred_exp, 0)

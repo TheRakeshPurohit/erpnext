@@ -1,12 +1,13 @@
 import unittest
 
 import frappe
+from frappe.tests import IntegrationTestCase
 
 from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 from erpnext.buying.doctype.supplier.test_supplier import create_supplier
 
 
-class TestWebsite(unittest.TestCase):
+class TestWebsite(IntegrationTestCase):
 	def test_permission_for_custom_doctype(self):
 		create_user("Supplier 1", "supplier1@gmail.com")
 		create_user("Supplier 2", "supplier2@gmail.com")
@@ -47,7 +48,7 @@ def get_data():
 	webform_list_contexts = frappe.get_hooks("webform_list_context")
 	if webform_list_contexts:
 		context = frappe._dict(frappe.get_attr(webform_list_contexts[0])("Buying") or {})
-	kwargs = dict(doctype="Order Assignment", order_by="modified desc")
+	kwargs = dict(doctype="Order Assignment", order_by="creation desc")
 	return context.get_list(**kwargs)
 
 

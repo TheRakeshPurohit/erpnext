@@ -28,6 +28,7 @@ class SubcontractingReceiptItem(Document):
 		is_scrap_item: DF.Check
 		item_code: DF.Link
 		item_name: DF.Data | None
+		job_card: DF.Link | None
 		manufacturer: DF.Link | None
 		manufacturer_part_no: DF.Data | None
 		page_break: DF.Check
@@ -58,6 +59,7 @@ class SubcontractingReceiptItem(Document):
 		subcontracting_order: DF.Link | None
 		subcontracting_order_item: DF.Data | None
 		subcontracting_receipt_item: DF.Data | None
+		use_serial_batch_fields: DF.Check
 		warehouse: DF.Link | None
 	# end: auto-generated types
 

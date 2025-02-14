@@ -60,6 +60,7 @@ class Account(NestedSet):
 			"Payable",
 			"Receivable",
 			"Round Off",
+			"Round Off for Opening",
 			"Stock",
 			"Stock Adjustment",
 			"Stock Received But Not Billed",
@@ -88,12 +89,10 @@ class Account(NestedSet):
 		if frappe.local.flags.ignore_update_nsm:
 			return
 		else:
-			super(Account, self).on_update()
+			super().on_update()
 
 	def onload(self):
-		frozen_accounts_modifier = frappe.db.get_single_value(
-			"Accounts Settings", "frozen_accounts_modifier"
-		)
+		frozen_accounts_modifier = frappe.db.get_single_value("Accounts Settings", "frozen_accounts_modifier")
 		if not frozen_accounts_modifier or frozen_accounts_modifier in frappe.get_roles():
 			self.set_onload("can_freeze_account", True)
 
@@ -103,14 +102,12 @@ class Account(NestedSet):
 		self.name = get_autoname_with_number(self.account_number, self.account_name, self.company)
 
 	def validate(self):
-		from erpnext.accounts.utils import validate_field_number
-
 		if frappe.local.flags.allow_unverified_charts:
 			return
 		self.validate_parent()
 		self.validate_parent_child_account_type()
 		self.validate_root_details()
-		validate_field_number("Account", self.name, self.account_number, self.company, "account_number")
+		self.validate_account_number()
 		self.validate_group_or_ledger()
 		self.set_root_and_report_type()
 		self.validate_mandatory()
@@ -202,7 +199,7 @@ class Account(NestedSet):
 				msg = _(
 					"There are ledger entries against this account. Changing {0} to non-{1} in live system will cause incorrect output in 'Accounts {2}' report"
 				).format(
-					frappe.bold("Account Type"), doc_before_save.account_type, doc_before_save.account_type
+					frappe.bold(_("Account Type")), doc_before_save.account_type, doc_before_save.account_type
 				)
 				frappe.msgprint(msg)
 				self.add_comment("Comment", msg)
@@ -218,9 +215,7 @@ class Account(NestedSet):
 
 	def validate_root_company_and_sync_account_to_children(self):
 		# ignore validation while creating new compnay or while syncing to child companies
-		if (
-			frappe.local.flags.ignore_root_company_validation or self.flags.ignore_root_company_validation
-		):
+		if frappe.local.flags.ignore_root_company_validation or self.flags.ignore_root_company_validation:
 			return
 		ancestors = get_root_company(self.company)
 		if ancestors:
@@ -312,6 +307,22 @@ class Account(NestedSet):
 		if gl_currency and self.account_currency != gl_currency:
 			if frappe.db.get_value("GL Entry", {"account": self.name}):
 				frappe.throw(_("Currency can not be changed after making entries using some other currency"))
+
+	def validate_account_number(self, account_number=None):
+		if not account_number:
+			account_number = self.account_number
+
+		if account_number:
+			account_with_same_number = frappe.db.get_value(
+				"Account",
+				{"account_number": account_number, "company": self.company, "name": ["!=", self.name]},
+			)
+			if account_with_same_number:
+				frappe.throw(
+					_("Account Number {0} already used in account {1}").format(
+						account_number, account_with_same_number
+					)
+				)
 
 	def create_account_for_child_company(self, parent_acc_name_map, descendants, parent_acc_name):
 		for company in descendants:
@@ -418,7 +429,7 @@ class Account(NestedSet):
 		if self.check_gle_exists():
 			throw(_("Account with existing transaction can not be deleted"))
 
-		super(Account, self).on_trash(True)
+		super().on_trash(True)
 
 
 @frappe.whitelist()
@@ -426,9 +437,8 @@ class Account(NestedSet):
 def get_parent_account(doctype, txt, searchfield, start, page_len, filters):
 	return frappe.db.sql(
 		"""select name from tabAccount
-		where is_group = 1 and docstatus != 2 and company = %s
-		and %s like %s order by name limit %s offset %s"""
-		% ("%s", searchfield, "%s", "%s", "%s"),
+		where is_group = 1 and docstatus != 2 and company = {}
+		and {} like {} order by name limit {} offset {}""".format("%s", searchfield, "%s", "%s", "%s"),
 		(filters["company"], "%%%s%%" % txt, page_len, start),
 		as_list=1,
 	)
@@ -465,19 +475,6 @@ def get_account_autoname(account_number, account_name, company):
 	if cstr(account_number).strip():
 		parts.insert(0, cstr(account_number).strip())
 	return " - ".join(parts)
-
-
-def validate_account_number(name, account_number, company):
-	if account_number:
-		account_with_same_number = frappe.db.get_value(
-			"Account", {"account_number": account_number, "company": company, "name": ["!=", name]}
-		)
-		if account_with_same_number:
-			frappe.throw(
-				_("Account Number {0} already used in account {1}").format(
-					account_number, account_with_same_number
-				)
-			)
 
 
 @frappe.whitelist()
@@ -520,7 +517,7 @@ def update_account_number(name, account_name, account_number=None, from_descenda
 
 				frappe.throw(message, title=_("Rename Not Allowed"))
 
-	validate_account_number(name, account_number, account.company)
+	account.validate_account_number(account_number)
 	if account_number:
 		frappe.db.set_value("Account", name, "account_number", account_number.strip())
 	else:
@@ -594,7 +591,5 @@ def sync_update_account_number_in_child(
 	if old_acc_number:
 		filters["account_number"] = old_acc_number
 
-	for d in frappe.db.get_values(
-		"Account", filters=filters, fieldname=["company", "name"], as_dict=True
-	):
+	for d in frappe.db.get_values("Account", filters=filters, fieldname=["company", "name"], as_dict=True):
 		update_account_number(d["name"], account_name, account_number, from_descendant=True)

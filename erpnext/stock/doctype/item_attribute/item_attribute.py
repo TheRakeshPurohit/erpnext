@@ -30,15 +30,13 @@ class ItemAttribute(Document):
 		from erpnext.stock.doctype.item_attribute_value.item_attribute_value import ItemAttributeValue
 
 		attribute_name: DF.Data
+		disabled: DF.Check
 		from_range: DF.Float
 		increment: DF.Float
 		item_attribute_values: DF.Table[ItemAttributeValue]
 		numeric_values: DF.Check
 		to_range: DF.Float
 	# end: auto-generated types
-
-	def __setup__(self):
-		self.flags.ignore_these_exceptions_in_test = [InvalidItemAttributeValueError]
 
 	def validate(self):
 		frappe.flags.attribute_values = None
@@ -47,6 +45,19 @@ class ItemAttribute(Document):
 
 	def on_update(self):
 		self.validate_exising_items()
+		self.set_enabled_disabled_in_items()
+
+	def set_enabled_disabled_in_items(self):
+		db_value = self.get_doc_before_save()
+		if not db_value or db_value.disabled != self.disabled:
+			item_variant_table = frappe.qb.DocType("Item Variant Attribute")
+			query = (
+				frappe.qb.update(item_variant_table)
+				.set(item_variant_table.disabled, self.disabled)
+				.where(item_variant_table.attribute == self.name)
+			)
+
+			query.run()
 
 	def validate_exising_items(self):
 		"""Validate that if there are existing items with attributes, they are valid"""
@@ -93,7 +104,9 @@ class ItemAttribute(Document):
 		values, abbrs = [], []
 		for d in self.item_attribute_values:
 			if d.attribute_value.lower() in map(str.lower, values):
-				frappe.throw(_("Attribute value: {0} must appear only once").format(d.attribute_value.title()))
+				frappe.throw(
+					_("Attribute value: {0} must appear only once").format(d.attribute_value.title())
+				)
 			values.append(d.attribute_value)
 
 			if d.abbr.lower() in map(str.lower, abbrs):

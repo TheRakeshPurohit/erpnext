@@ -8,9 +8,10 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
+  "company",
   "report_date",
   "status",
-  "manual_inspection",
+  "child_row_reference",
   "column_break_4",
   "inspection_type",
   "reference_type",
@@ -26,6 +27,7 @@
   "bom_no",
   "specification_details",
   "quality_inspection_template",
+  "manual_inspection",
   "readings",
   "section_break_14",
   "inspected_by",
@@ -238,6 +240,21 @@
    "fieldname": "manual_inspection",
    "fieldtype": "Check",
    "label": "Manual Inspection"
+  },
+  {
+   "fieldname": "child_row_reference",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Child Row Reference",
+   "no_copy": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
   }
  ],
  "icon": "fa fa-search",
@@ -245,7 +262,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2023-08-23 11:56:50.282878",
+ "modified": "2025-01-16 17:00:48.774532",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Quality Inspection",
@@ -269,7 +286,7 @@
  ],
  "search_fields": "item_code, report_date, reference_name",
  "show_name_in_global_search": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "ASC",
  "states": []
 }

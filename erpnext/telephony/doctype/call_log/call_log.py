@@ -68,9 +68,7 @@ class CallLog(Document):
 	def on_update(self):
 		def _is_call_missed(doc_before_save, doc_after_save):
 			# FIXME: This works for Exotel but not for all telepony providers
-			return (
-				doc_before_save.to != doc_after_save.to and doc_after_save.status not in END_CALL_STATUSES
-			)
+			return doc_before_save.to != doc_after_save.to and doc_after_save.status not in END_CALL_STATUSES
 
 		def _is_call_ended(doc_before_save, doc_after_save):
 			return doc_before_save.status not in END_CALL_STATUSES and self.status in END_CALL_STATUSES
@@ -83,11 +81,11 @@ class CallLog(Document):
 			self.update_received_by()
 
 		if _is_call_missed(doc_before_save, self):
-			frappe.publish_realtime("call_{id}_missed".format(id=self.id), self)
+			frappe.publish_realtime(f"call_{self.id}_missed", self)
 			self.trigger_call_popup()
 
 		if _is_call_ended(doc_before_save, self):
-			frappe.publish_realtime("call_{id}_ended".format(id=self.id), self)
+			frappe.publish_realtime(f"call_{self.id}_ended", self)
 
 	def is_incoming_call(self):
 		return self.type == "Incoming"
@@ -159,6 +157,8 @@ def link_existing_conversations(doc, state):
 	"""
 	Called from hooks on creation of Contact or Lead to link all the existing conversations.
 	"""
+	if doc.flags.ignore_auto_link_call_log:
+		return
 	if doc.doctype != "Contact":
 		return
 	try:
@@ -185,12 +185,12 @@ def link_existing_conversations(doc, state):
 				""",
 				dict(phone_number=f"%{number}", docname=doc.name, doctype=doc.doctype),
 			)
-
-			for log in logs:
-				call_log = frappe.get_doc("Call Log", log)
-				call_log.add_link(link_type=doc.doctype, link_name=doc.name)
-				call_log.save(ignore_permissions=True)
-			frappe.db.commit()
+			if logs:
+				for log in logs:
+					call_log = frappe.get_doc("Call Log", log)
+					call_log.add_link(link_type=doc.doctype, link_name=doc.name)
+					call_log.save(ignore_permissions=True)
+				frappe.db.commit()
 	except Exception:
 		frappe.log_error(title=_("Error during caller information update"))
 

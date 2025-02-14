@@ -9,7 +9,7 @@ from frappe.desk.reportview import get_match_cond
 from frappe.model.document import Document
 from frappe.query_builder import Interval
 from frappe.query_builder.functions import Count, CurDate, Date, Sum, UnixTimestamp
-from frappe.utils import add_days, flt, get_datetime, get_time, get_url, nowtime, today
+from frappe.utils import add_days, flt, get_datetime, get_link_to_form, get_time, get_url, nowtime, today
 from frappe.utils.user import is_website_user
 
 from erpnext import get_default_company
@@ -38,9 +38,7 @@ class Project(Document):
 		cost_center: DF.Link | None
 		customer: DF.Link | None
 		daily_time_to_send: DF.Time | None
-		day_to_send: DF.Literal[
-			"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
-		]
+		day_to_send: DF.Literal["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 		department: DF.Link | None
 		estimated_costing: DF.Currency
 		expected_end_date: DF.Date | None
@@ -88,26 +86,23 @@ class Project(Document):
 			),
 		)
 
-		self.update_costing()
-
 	def before_print(self, settings=None):
 		self.onload()
 
 	def validate(self):
 		if not self.is_new():
-			self.copy_from_template()
+			self.copy_from_template()  # nosemgrep
 		self.send_welcome_email()
 		self.update_costing()
 		self.update_percent_complete()
 		self.validate_from_to_dates("expected_start_date", "expected_end_date")
 		self.validate_from_to_dates("actual_start_date", "actual_end_date")
 
-	def copy_from_template(self):
+	def copy_from_template(self):  # nosemgrep
 		"""
 		Copy tasks from template
 		"""
 		if self.project_template and not frappe.db.get_all("Task", dict(project=self.name), limit=1):
-
 			# has a template, and no loaded tasks, so lets create
 			if not self.expected_start_date:
 				# project starts today
@@ -145,6 +140,7 @@ class Project(Document):
 				is_group=task_details.is_group,
 				color=task_details.color,
 				template_task=task_details.name,
+				priority=task_details.priority,
 			)
 		).insert()
 
@@ -177,7 +173,9 @@ class Project(Document):
 			for child_task in template_task.get("depends_on"):
 				if project_template_map and project_template_map.get(child_task.task):
 					project_task.reload()  # reload, as it might have been updated in the previous iteration
-					project_task.append("depends_on", {"task": project_template_map.get(child_task.task).name})
+					project_task.append(
+						"depends_on", {"task": project_template_map.get(child_task.task).name}
+					)
 					project_task.save()
 
 	def check_for_parent_tasks(self, template_task, project_task, project_tasks):
@@ -205,7 +203,7 @@ class Project(Document):
 		self.db_update()
 
 	def after_insert(self):
-		self.copy_from_template()
+		self.copy_from_template()  # nosemgrep
 		if self.sales_order:
 			frappe.db.set_value("Sales Order", self.sales_order, "project", self.name)
 
@@ -213,6 +211,13 @@ class Project(Document):
 		frappe.db.set_value("Sales Order", {"project": self.name}, "project", "")
 
 	def update_percent_complete(self):
+		if self.status == "Completed":
+			if (
+				len(frappe.get_all("Task", dict(project=self.name))) == 0
+			):  # A project without tasks should be able to complete
+				self.percent_complete_method = "Manual"
+				self.percent_complete = 100
+
 		if self.percent_complete_method == "Manual":
 			if self.status == "Completed":
 				self.percent_complete = 100
@@ -262,8 +267,7 @@ class Project(Document):
 		if self.status == "Cancelled":
 			return
 
-		if self.percent_complete == 100:
-			self.status = "Completed"
+		self.status = "Completed" if self.percent_complete == 100 else "Open"
 
 	def update_costing(self):
 		from frappe.query_builder.functions import Max, Min, Sum
@@ -318,9 +322,13 @@ class Project(Document):
 		self.total_sales_amount = total_sales_amount and total_sales_amount[0][0] or 0
 
 	def update_billed_amount(self):
+		# nosemgrep
 		total_billed_amount = frappe.db.sql(
-			"""select sum(base_net_total)
-			from `tabSales Invoice` where project = %s and docstatus=1""",
+			"""select sum(base_net_amount)
+			from `tabSales Invoice Item` si_item, `tabSales Invoice` si
+			where si_item.parent = si.name
+				and if(si_item.project, si_item.project, si.project) = %s
+				and si.docstatus=1""",
 			self.name,
 		)
 
@@ -331,22 +339,19 @@ class Project(Document):
 			frappe.db.set_value("Project", new_name, "copied_from", new_name)
 
 	def send_welcome_email(self):
-		url = get_url("/project/?name={0}".format(self.name))
-		messages = (
-			_("You have been invited to collaborate on the project: {0}").format(self.name),
-			url,
-			_("Join"),
-		)
+		label = f"{self.project_name} ({self.name})"
+		url = get_link_to_form(self.doctype, self.name, label)
 
-		content = """
-		<p>{0}.</p>
-		<p><a href="{1}">{2}</a></p>
-		"""
+		content = "<p>{}</p>".format(
+			_("You have been invited to collaborate on the project {0}.").format(url)
+		)
 
 		for user in self.users:
 			if user.welcome_email_sent == 0:
 				frappe.sendmail(
-					user.user, subject=_("Project Collaboration Invitation"), content=content.format(*messages)
+					user.user,
+					subject=_("Project Collaboration Invitation"),
+					content=content,
 				)
 				user.welcome_email_sent = 1
 
@@ -367,9 +372,7 @@ def get_timeline_data(doctype: str, name: str) -> dict[int, int]:
 	)
 
 
-def get_project_list(
-	doctype, txt, filters, limit_start, limit_page_length=20, order_by="modified"
-):
+def get_project_list(doctype, txt, filters, limit_start, limit_page_length=20, order_by="creation"):
 	customers, suppliers = get_customers_suppliers("Project", frappe.session.user)
 
 	ignore_permissions = False
@@ -670,33 +673,8 @@ def update_project_sales_billing():
 		return
 
 	# Else simply fallback to Daily
-	exists_query = (
-		"(SELECT 1 from `tab{doctype}` where docstatus = 1 and project = `tabProject`.name)"
-	)
-	project_map = {}
-	for project_details in frappe.db.sql(
-		"""
-			SELECT name, 1 as order_exists, null as invoice_exists from `tabProject` where
-			exists {order_exists}
-			union
-			SELECT name, null as order_exists, 1 as invoice_exists from `tabProject` where
-			exists {invoice_exists}
-		""".format(
-			order_exists=exists_query.format(doctype="Sales Order"),
-			invoice_exists=exists_query.format(doctype="Sales Invoice"),
-		),
-		as_dict=True,
-	):
-		project = project_map.setdefault(
-			project_details.name, frappe.get_doc("Project", project_details.name)
-		)
-		if project_details.order_exists:
-			project.update_sales_amount()
-		if project_details.invoice_exists:
-			project.update_billed_amount()
-
-	for project in project_map.values():
-		project.save()
+	for project in frappe.get_all("Project", filters={"status": ["!=", "Cancelled"]}):
+		frappe.get_doc("Project", project.name).save()
 
 
 @frappe.whitelist()
@@ -735,9 +713,7 @@ def get_holiday_list(company=None):
 	holiday_list = frappe.get_cached_value("Company", company, "default_holiday_list")
 	if not holiday_list:
 		frappe.throw(
-			_("Please set a default Holiday List for Company {0}").format(
-				frappe.bold(get_default_company())
-			)
+			_("Please set a default Holiday List for Company {0}").format(frappe.bold(get_default_company()))
 		)
 	return holiday_list
 
@@ -749,7 +725,6 @@ def get_users_email(doc):
 def calculate_total_purchase_cost(project: str | None = None):
 	if project:
 		pitem = qb.DocType("Purchase Invoice Item")
-		frappe.qb.DocType("Purchase Invoice Item")
 		total_purchase_cost = (
 			qb.from_(pitem)
 			.select(Sum(pitem.base_net_amount))

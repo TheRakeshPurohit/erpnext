@@ -12,7 +12,7 @@ from erpnext.accounts.doctype.accounting_dimension.test_accounting_dimension imp
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.exceptions import InvalidAccountDimensionError, MandatoryAccountDimensionError
 
-test_dependencies = ["Location", "Cost Center", "Department"]
+EXTRA_TEST_RECORD_DEPENDENCIES = ["Location", "Cost Center", "Department"]
 
 
 class TestAccountingDimensionFilter(unittest.TestCase):
@@ -47,6 +47,8 @@ class TestAccountingDimensionFilter(unittest.TestCase):
 	def tearDown(self):
 		disable_dimension_filter()
 		disable_dimension()
+		frappe.flags.accounting_dimensions_details = None
+		frappe.flags.dimension_filter_map = None
 
 		for si in self.invoice_list:
 			si.load_from_db()
@@ -55,9 +57,7 @@ class TestAccountingDimensionFilter(unittest.TestCase):
 
 
 def create_accounting_dimension_filter():
-	if not frappe.db.get_value(
-		"Accounting Dimension Filter", {"accounting_dimension": "Cost Center"}
-	):
+	if not frappe.db.get_value("Accounting Dimension Filter", {"accounting_dimension": "Cost Center"}):
 		frappe.get_doc(
 			{
 				"doctype": "Accounting Dimension Filter",

@@ -1,4 +1,4 @@
-from typing import List, NewType
+from typing import NewType
 
 import frappe
 
@@ -13,9 +13,9 @@ def execute():
 		create_repost_item_valuation(patched_stock_entry)
 
 
-def find_broken_stock_entries() -> List[StockEntryCode]:
+def find_broken_stock_entries() -> list[StockEntryCode]:
 	period_closing_date = frappe.db.get_value(
-		"Period Closing Voucher", {"docstatus": 1}, "posting_date", order_by="posting_date desc"
+		"Period Closing Voucher", {"docstatus": 1}, "period_end_date", order_by="period_end_date desc"
 	)
 
 	stock_entries_to_patch = frappe.db.sql(

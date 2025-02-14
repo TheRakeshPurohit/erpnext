@@ -20,6 +20,8 @@
   "party",
   "party_name",
   "book_advance_payments_in_separate_party_account",
+  "reconcile_on_advance_payment_date",
+  "advance_reconciliation_takes_effect_on",
   "column_break_11",
   "bank_account",
   "party_bank_account",
@@ -55,7 +57,6 @@
   "section_break_34",
   "total_allocated_amount",
   "base_total_allocated_amount",
-  "set_exchange_gain_loss",
   "column_break_36",
   "unallocated_amount",
   "difference_amount",
@@ -88,6 +89,7 @@
   "custom_remarks",
   "remarks",
   "base_in_words",
+  "is_opening",
   "column_break_16",
   "letter_head",
   "print_heading",
@@ -150,6 +152,7 @@
    "reqd": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "cost_center",
    "fieldtype": "Link",
    "label": "Cost Center",
@@ -221,6 +224,7 @@
    "label": "Accounts"
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "party",
    "fieldname": "party_balance",
    "fieldtype": "Currency",
@@ -251,6 +255,7 @@
    "reqd": 1
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "paid_from",
    "fieldname": "paid_from_account_balance",
    "fieldtype": "Currency",
@@ -284,6 +289,7 @@
    "reqd": 1
   },
   {
+   "allow_on_submit": 1,
    "depends_on": "paid_to",
    "fieldname": "paid_to_account_balance",
    "fieldtype": "Currency",
@@ -389,11 +395,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "set_exchange_gain_loss",
-   "fieldtype": "Button",
-   "label": "Set Exchange Gain / Loss"
-  },
-  {
    "fieldname": "column_break_36",
    "fieldtype": "Column Break"
   },
@@ -477,6 +478,7 @@
    "label": "More Information"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "project",
    "fieldtype": "Link",
    "label": "Project",
@@ -580,6 +582,7 @@
    "fieldtype": "Select",
    "hidden": 1,
    "label": "Payment Order Status",
+   "no_copy": 1,
    "options": "Initiated\nPayment Ordered",
    "read_only": 1
   },
@@ -748,6 +751,7 @@
    "fieldtype": "Check",
    "hidden": 1,
    "label": "Book Advance Payments in Separate Party Account",
+   "no_copy": 1,
    "read_only": 1
   },
   {
@@ -763,6 +767,36 @@
    "label": "In Words",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fetch_from": "company.reconcile_on_advance_payment_date",
+   "fieldname": "reconcile_on_advance_payment_date",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Reconcile on Advance Payment Date",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "default": "No",
+   "depends_on": "eval: doc.book_advance_payments_in_separate_party_account == 1",
+   "fieldname": "is_opening",
+   "fieldtype": "Select",
+   "label": "Is Opening",
+   "options": "No\nYes",
+   "print_hide": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Oldest Of Invoice Or Advance",
+   "fetch_from": "company.reconciliation_takes_effect_on",
+   "fieldname": "advance_reconciliation_takes_effect_on",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Advance Reconciliation Takes Effect On",
+   "no_copy": 1,
+   "options": "Advance Payment Date\nOldest Of Invoice Or Advance\nReconciliation Date"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -776,7 +810,7 @@
    "table_fieldname": "payment_entries"
   }
  ],
- "modified": "2024-01-08 13:17:15.744754",
+ "modified": "2025-01-31 17:27:28.555246",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Payment Entry",
@@ -817,7 +851,7 @@
   }
  ],
  "show_name_in_global_search": 1,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "title_field": "title",

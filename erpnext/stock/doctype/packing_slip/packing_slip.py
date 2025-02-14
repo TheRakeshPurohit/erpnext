@@ -34,7 +34,7 @@ class PackingSlip(StatusUpdater):
 	# end: auto-generated types
 
 	def __init__(self, *args, **kwargs) -> None:
-		super(PackingSlip, self).__init__(*args, **kwargs)
+		super().__init__(*args, **kwargs)
 		self.status_updater = [
 			{
 				"target_dt": "Delivery Note Item",
@@ -87,9 +87,7 @@ class PackingSlip(StatusUpdater):
 		"""Validate if case nos overlap. If they do, recommend next case no."""
 
 		if cint(self.from_case_no) <= 0:
-			frappe.throw(
-				_("The 'From Package No.' field must neither be empty nor it's value less than 1.")
-			)
+			frappe.throw(_("The 'From Package No.' field must neither be empty nor it's value less than 1."))
 		elif not self.to_case_no:
 			self.to_case_no = self.from_case_no
 		elif cint(self.to_case_no) < cint(self.from_case_no):
@@ -161,11 +159,10 @@ class PackingSlip(StatusUpdater):
 			self.from_case_no = self.get_recommended_case_no()
 
 		for item in self.items:
-			stock_uom, weight_per_unit, weight_uom = frappe.db.get_value(
-				"Item", item.item_code, ["stock_uom", "weight_per_unit", "weight_uom"]
+			weight_per_unit, weight_uom = frappe.db.get_value(
+				"Item", item.item_code, ["weight_per_unit", "weight_uom"]
 			)
 
-			item.stock_uom = stock_uom
 			if weight_per_unit and not item.net_weight:
 				item.net_weight = weight_per_unit
 			if weight_uom and not item.weight_uom:
@@ -212,9 +209,8 @@ def item_details(doctype, txt, searchfield, start, page_len, filters):
 	return frappe.db.sql(
 		"""select name, item_name, description from `tabItem`
 				where name in ( select item_code FROM `tabDelivery Note Item`
-	 						where parent= %s)
-	 			and %s like "%s" %s
-	 			limit  %s offset %s """
-		% ("%s", searchfield, "%s", get_match_cond(doctype), "%s", "%s"),
+	 						where parent= {})
+	 			and {} like "{}" {}
+	 			limit  {} offset {} """.format("%s", searchfield, "%s", get_match_cond(doctype), "%s", "%s"),
 		((filters or {}).get("delivery_note"), "%%%s%%" % txt, page_len, start),
 	)

@@ -6,8 +6,9 @@ from frappe import _
 from frappe.utils import cstr, flt
 from frappe.utils.file_manager import remove_file
 
-from erpnext.controllers.taxes_and_totals import get_itemised_tax
+from erpnext.controllers.taxes_and_totals import ItemWiseTaxDetail, get_itemised_tax
 from erpnext.regional.italy import state_codes
+from erpnext.stock.utils import get_default_stock_uom
 
 
 def update_itemised_tax_data(doc):
@@ -39,7 +40,7 @@ def export_invoices(filters=None):
 
 	attachments = get_e_invoice_attachments(invoices)
 
-	zip_filename = "{0}-einvoices.zip".format(frappe.utils.get_datetime().strftime("%Y%m%d_%H%M%S"))
+	zip_filename = "{}-einvoices.zip".format(frappe.utils.get_datetime().strftime("%Y%m%d_%H%M%S"))
 
 	download_zip(attachments, zip_filename)
 
@@ -159,7 +160,7 @@ def get_invoice_summary(items, taxes):
 						rate=reference_row.tax_amount,
 						qty=1.0,
 						amount=reference_row.tax_amount,
-						stock_uom=frappe.db.get_single_value("Stock Settings", "stock_uom") or _("Nos"),
+						stock_uom=get_default_stock_uom(),
 						tax_rate=tax.rate,
 						tax_amount=(reference_row.tax_amount * tax.rate) / 100,
 						net_amount=reference_row.tax_amount,
@@ -214,16 +215,16 @@ def get_invoice_summary(items, taxes):
 
 		else:
 			item_wise_tax_detail = json.loads(tax.item_wise_tax_detail)
-			for rate_item in [
-				tax_item for tax_item in item_wise_tax_detail.items() if tax_item[1][0] == tax.rate
-			]:
+			# TODO: with net_amount stored inside item_wise_tax_detail, this entire block seems obsolete and redundant
+			for _item_code, tax_data in item_wise_tax_detail.items():
+				tax_data = ItemWiseTaxDetail(**tax_data)
+				if tax_data.tax_rate != tax.rate:
+					continue
 				key = cstr(tax.rate)
 				if not summary_data.get(key):
 					summary_data.setdefault(key, {"tax_amount": 0.0, "taxable_amount": 0.0})
-				summary_data[key]["tax_amount"] += rate_item[1][1]
-				summary_data[key]["taxable_amount"] += sum(
-					[item.net_amount for item in items if item.item_code == rate_item[0]]
-				)
+				summary_data[key]["tax_amount"] += tax_data.tax_amount
+				summary_data[key]["taxable_amount"] += tax_data.net_amount
 
 			for item in items:
 				key = cstr(tax.rate)
@@ -307,7 +308,9 @@ def sales_invoice_validate(doc):
 		for row in doc.taxes:
 			if row.rate == 0 and row.tax_amount == 0 and not row.tax_exemption_reason:
 				frappe.throw(
-					_("Row {0}: Please set at Tax Exemption Reason in Sales Taxes and Charges").format(row.idx),
+					_("Row {0}: Please set at Tax Exemption Reason in Sales Taxes and Charges").format(
+						row.idx
+					),
 					title=_("E-Invoicing Information Missing"),
 				)
 
@@ -329,24 +332,19 @@ def sales_invoice_on_submit(doc, method):
 	]:
 		return
 
-	if not len(doc.payment_schedule):
-		frappe.throw(_("Please set the Payment Schedule"), title=_("E-Invoicing Information Missing"))
-	else:
-		for schedule in doc.payment_schedule:
-			if not schedule.mode_of_payment:
-				frappe.throw(
-					_("Row {0}: Please set the Mode of Payment in Payment Schedule").format(schedule.idx),
-					title=_("E-Invoicing Information Missing"),
-				)
-			elif not frappe.db.get_value(
-				"Mode of Payment", schedule.mode_of_payment, "mode_of_payment_code"
-			):
-				frappe.throw(
-					_("Row {0}: Please set the correct code on Mode of Payment {1}").format(
-						schedule.idx, schedule.mode_of_payment
-					),
-					title=_("E-Invoicing Information Missing"),
-				)
+	for schedule in doc.payment_schedule:
+		if not schedule.mode_of_payment:
+			frappe.throw(
+				_("Row {0}: Please set the Mode of Payment in Payment Schedule").format(schedule.idx),
+				title=_("E-Invoicing Information Missing"),
+			)
+		elif not frappe.db.get_value("Mode of Payment", schedule.mode_of_payment, "mode_of_payment_code"):
+			frappe.throw(
+				_("Row {0}: Please set the correct code on Mode of Payment {1}").format(
+					schedule.idx, schedule.mode_of_payment
+				),
+				title=_("E-Invoicing Information Missing"),
+			)
 
 	prepare_and_attach_invoice(doc)
 
@@ -473,9 +471,7 @@ def get_progressive_name_and_number(doc, replace=False):
 			filename = attachment.file_name.split(".xml")[0]
 			return filename, filename.split("_")[1]
 
-	company_tax_id = (
-		doc.company_tax_id if doc.company_tax_id.startswith("IT") else "IT" + doc.company_tax_id
-	)
+	company_tax_id = doc.company_tax_id if doc.company_tax_id.startswith("IT") else "IT" + doc.company_tax_id
 	progressive_name = frappe.model.naming.make_autoname(company_tax_id + "_.#####")
 	progressive_number = progressive_name.split("_")[1]
 

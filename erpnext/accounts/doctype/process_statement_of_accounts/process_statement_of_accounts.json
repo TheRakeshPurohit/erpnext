@@ -16,6 +16,7 @@
   "cost_center",
   "territory",
   "ignore_exchange_rate_revaluation_journals",
+  "ignore_cr_dr_notes",
   "column_break_14",
   "to_date",
   "finance_book",
@@ -24,6 +25,7 @@
   "payment_terms_template",
   "sales_partner",
   "sales_person",
+  "show_remarks",
   "based_on_payment_terms",
   "section_break_3",
   "customer_collection",
@@ -242,9 +244,9 @@
   },
   {
    "fieldname": "cc_to",
-   "fieldtype": "Link",
+   "fieldtype": "Table MultiSelect",
    "label": "CC To",
-   "options": "User"
+   "options": "Process Statement Of Accounts CC"
   },
   {
    "default": "1",
@@ -383,10 +385,22 @@
    "fieldname": "ignore_exchange_rate_revaluation_journals",
    "fieldtype": "Check",
    "label": "Ignore Exchange Rate Revaluation Journals"
+  },
+  {
+   "default": "0",
+   "fieldname": "ignore_cr_dr_notes",
+   "fieldtype": "Check",
+   "label": "Ignore System Generated Credit / Debit Notes"
+  },
+  {
+   "default": "0",
+   "fieldname": "show_remarks",
+   "fieldtype": "Check",
+   "label": "Show Remarks"
   }
  ],
  "links": [],
- "modified": "2023-12-18 12:20:08.965120",
+ "modified": "2024-12-11 12:11:13.543134",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Process Statement Of Accounts",
@@ -418,7 +432,7 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "track_changes": 1

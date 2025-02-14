@@ -2,6 +2,7 @@ import unittest
 
 import frappe
 from frappe.test_runner import make_test_objects
+from frappe.tests import IntegrationTestCase
 
 from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
 from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
@@ -10,17 +11,16 @@ from erpnext.accounts.utils import (
 	get_future_stock_vouchers,
 	get_voucherwise_gl_entries,
 	sort_stock_vouchers_by_posting_date,
-	update_reference_in_payment_entry,
 )
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 
 
-class TestUtils(unittest.TestCase):
+class TestUtils(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
-		super(TestUtils, cls).setUpClass()
+		super().setUpClass()
 		make_test_objects("Address", ADDRESS_RECORDS)
 
 	@classmethod
@@ -36,7 +36,6 @@ class TestUtils(unittest.TestCase):
 		self.assertEqual(address, "_Test Shipping Address 2 Title-Shipping")
 
 	def test_get_voucher_wise_gl_entry(self):
-
 		pr = make_purchase_receipt(
 			item_code="_Test Item",
 			posting_date="2021-02-01",
@@ -94,14 +93,14 @@ class TestUtils(unittest.TestCase):
 		payment_entry.deductions = []
 		payment_entry.save()
 
-		# below is the difference between base_received_amount and base_paid_amount
-		self.assertEqual(payment_entry.difference_amount, -4855.0)
+		# below is the difference between base_paid_amount and base_received_amount (exchange gain)
+		self.assertEqual(payment_entry.deductions[0].amount, -4855.0)
 
 		payment_entry.target_exchange_rate = 62.9
 		payment_entry.save()
 
-		# below is due to change in exchange rate
-		self.assertEqual(payment_entry.references[0].exchange_gain_loss, -4855.0)
+		# after changing the exchange rate, there is no exchange gain / loss
+		self.assertEqual(payment_entry.deductions, [])
 
 		payment_entry.references = []
 		self.assertEqual(payment_entry.difference_amount, 0.0)
@@ -144,12 +143,8 @@ class TestUtils(unittest.TestCase):
 		frappe.db.set_default("supp_master_name", "Auto Name")
 
 		# Configure Autoname in Supplier DocType
-		make_property_setter(
-			"Supplier", None, "naming_rule", "Expression", "Data", for_doctype="Doctype"
-		)
-		make_property_setter(
-			"Supplier", None, "autoname", "SUP-.FY.-.#####", "Data", for_doctype="Doctype"
-		)
+		make_property_setter("Supplier", None, "naming_rule", "Expression", "Data", for_doctype="Doctype")
+		make_property_setter("Supplier", None, "autoname", "SUP-.FY.-.#####", "Data", for_doctype="Doctype")
 
 		fiscal_year = get_fiscal_year(nowdate())[0]
 
@@ -171,9 +166,7 @@ ADDRESS_RECORDS = [
 		"address_title": "_Test Billing Address Title",
 		"city": "Lagos",
 		"country": "Nigeria",
-		"links": [
-			{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}
-		],
+		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}],
 	},
 	{
 		"doctype": "Address",
@@ -182,9 +175,7 @@ ADDRESS_RECORDS = [
 		"address_title": "_Test Shipping Address 1 Title",
 		"city": "Lagos",
 		"country": "Nigeria",
-		"links": [
-			{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}
-		],
+		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}],
 	},
 	{
 		"doctype": "Address",
@@ -194,9 +185,7 @@ ADDRESS_RECORDS = [
 		"city": "Lagos",
 		"country": "Nigeria",
 		"is_shipping_address": "1",
-		"links": [
-			{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}
-		],
+		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 2", "doctype": "Dynamic Link"}],
 	},
 	{
 		"doctype": "Address",
@@ -206,8 +195,6 @@ ADDRESS_RECORDS = [
 		"city": "Lagos",
 		"country": "Nigeria",
 		"is_shipping_address": "1",
-		"links": [
-			{"link_doctype": "Customer", "link_name": "_Test Customer 1", "doctype": "Dynamic Link"}
-		],
+		"links": [{"link_doctype": "Customer", "link_name": "_Test Customer 1", "doctype": "Dynamic Link"}],
 	},
 ]

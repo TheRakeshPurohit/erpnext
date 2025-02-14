@@ -22,6 +22,8 @@ def execute(filters=None):
 	if not data:
 		return [], [], None, []
 
+	update_received_amount(data)
+
 	data, chart_data = prepare_data(data, filters)
 
 	return columns, data, None, chart_data
@@ -43,9 +45,10 @@ def get_data(filters):
 
 	query = (
 		frappe.qb.from_(po)
-		.from_(po_item)
+		.inner_join(po_item)
+		.on(po_item.parent == po.name)
 		.left_join(pi_item)
-		.on(pi_item.po_detail == po_item.name)
+		.on((pi_item.po_detail == po_item.name) & (pi_item.docstatus == 1))
 		.select(
 			po.transaction_date.as_("date"),
 			po_item.schedule_date.as_("required_date"),
@@ -59,7 +62,6 @@ def get_data(filters):
 			(po_item.qty - po_item.received_qty).as_("pending_qty"),
 			Sum(IfNull(pi_item.qty, 0)).as_("billed_qty"),
 			po_item.base_amount.as_("amount"),
-			(po_item.received_qty * po_item.base_rate).as_("received_qty_amount"),
 			(po_item.billed_amt * IfNull(po.conversion_rate, 1)).as_("billed_amount"),
 			(po_item.base_amount - (po_item.billed_amt * IfNull(po.conversion_rate, 1))).as_(
 				"pending_amount"
@@ -68,9 +70,7 @@ def get_data(filters):
 			po.company,
 			po_item.name,
 		)
-		.where(
-			(po_item.parent == po.name) & (po.status.notin(("Stopped", "Closed"))) & (po.docstatus == 1)
-		)
+		.where((po_item.parent == po.name) & (po.status.notin(("Stopped", "Closed"))) & (po.docstatus == 1))
 		.groupby(po_item.name)
 		.orderby(po.transaction_date)
 	)
@@ -80,9 +80,7 @@ def get_data(filters):
 			query = query.where(po[field] == filters.get(field))
 
 	if filters.get("from_date") and filters.get("to_date"):
-		query = query.where(
-			po.transaction_date.between(filters.get("from_date"), filters.get("to_date"))
-		)
+		query = query.where(po.transaction_date.between(filters.get("from_date"), filters.get("to_date")))
 
 	if filters.get("status"):
 		query = query.where(po.status.isin(filters.get("status")))
@@ -93,6 +91,42 @@ def get_data(filters):
 	data = query.run(as_dict=True)
 
 	return data
+
+
+def update_received_amount(data):
+	pr_data = get_received_amount_data(data)
+
+	for row in data:
+		row.received_qty_amount = flt(pr_data.get(row.name))
+
+
+def get_received_amount_data(data):
+	pr = frappe.qb.DocType("Purchase Receipt")
+	pr_item = frappe.qb.DocType("Purchase Receipt Item")
+
+	po_items = [row.name for row in data]
+
+	if not po_items:
+		return frappe._dict()
+
+	query = (
+		frappe.qb.from_(pr)
+		.inner_join(pr_item)
+		.on(pr_item.parent == pr.name)
+		.select(
+			pr_item.purchase_order_item,
+			Sum(pr_item.base_amount).as_("received_qty_amount"),
+		)
+		.where((pr.docstatus == 1) & (pr_item.purchase_order_item.isin(po_items)))
+		.groupby(pr_item.purchase_order_item)
+	)
+
+	data = query.run()
+
+	if not data:
+		return frappe._dict()
+
+	return frappe._dict(data)
 
 
 def prepare_data(data, filters):
@@ -150,7 +184,7 @@ def prepare_data(data, filters):
 
 
 def prepare_chart_data(pending, completed):
-	labels = ["Amount to Bill", "Billed Amount"]
+	labels = [_("Amount to Bill"), _("Billed Amount")]
 
 	return {
 		"data": {"labels": labels, "datasets": [{"values": [pending, completed]}]},

@@ -2,10 +2,9 @@
 # License: GNU General Public License v3. See license.txt
 
 
-import frappe
 from frappe.permissions import add_user_permission, remove_user_permission
-from frappe.tests.utils import FrappeTestCase, change_settings
-from frappe.utils import add_days, add_to_date, flt, nowdate, nowtime, today
+from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import add_days, cstr, flt, get_time, getdate, nowtime, today
 
 from erpnext.accounts.doctype.account.test_account import get_inventory_account
 from erpnext.controllers.accounts_controller import InvalidQtyError
@@ -20,7 +19,7 @@ from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle 
 	get_serial_nos_from_bundle,
 	make_serial_batch_bundle,
 )
-from erpnext.stock.doctype.serial_no.serial_no import *  # noqa
+from erpnext.stock.doctype.serial_no.serial_no import *
 from erpnext.stock.doctype.stock_entry.stock_entry import FinishedGoodError, make_stock_in_entry
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.stock.doctype.stock_ledger_entry.stock_ledger_entry import StockFreezeError
@@ -38,7 +37,7 @@ def get_sle(**args):
 	condition, values = "", []
 	for key, value in args.items():
 		condition += " and " if condition else " where "
-		condition += "`{0}`=%s".format(key)
+		condition += f"`{key}`=%s"
 		values.append(value)
 
 	return frappe.db.sql(
@@ -50,7 +49,16 @@ def get_sle(**args):
 	)
 
 
-class TestStockEntry(FrappeTestCase):
+class UnitTestStockEntry(UnitTestCase):
+	"""
+	Unit tests for StockEntry.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestStockEntry(IntegrationTestCase):
 	def tearDown(self):
 		frappe.db.rollback()
 		frappe.set_user("Administrator")
@@ -111,6 +119,12 @@ class TestStockEntry(FrappeTestCase):
 		self._test_auto_material_request("_Test Item")
 		self._test_auto_material_request("_Test Item", material_request_type="Transfer")
 
+	def test_barcode_item_stock_entry(self):
+		item_code = make_item("_Test Item Stock Entry For Barcode", barcode="BDD-1234567890")
+
+		se = make_stock_entry(item_code=item_code, target="_Test Warehouse - _TC", qty=1, basic_rate=100)
+		self.assertEqual(se.items[0].barcode, "BDD-1234567890")
+
 	def test_auto_material_request_for_variant(self):
 		fields = [{"field_name": "reorder_levels"}]
 		set_item_variant_settings(fields)
@@ -151,8 +165,7 @@ class TestStockEntry(FrappeTestCase):
 		)
 
 		projected_qty = (
-			frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "projected_qty")
-			or 0
+			frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "projected_qty") or 0
 		)
 
 		frappe.db.set_single_value("Stock Settings", "auto_indent", 1)
@@ -376,7 +389,7 @@ class TestStockEntry(FrappeTestCase):
 		"Test `is_finished_item` for one item repacked into two items."
 		make_stock_entry(item_code="_Test Item", target="_Test Warehouse - _TC", qty=100, basic_rate=100)
 
-		repack = frappe.copy_doc(test_records[3])
+		repack = frappe.copy_doc(self.globalTestRecords["Stock Entry"][3])
 		repack.posting_date = nowdate()
 		repack.posting_time = nowtime()
 
@@ -421,7 +434,7 @@ class TestStockEntry(FrappeTestCase):
 			item_code="_Test Item Home Desktop 100", target="_Test Warehouse - _TC", qty=50, basic_rate=100
 		)
 
-		repack = frappe.copy_doc(test_records[3])
+		repack = frappe.copy_doc(self.globalTestRecords["Stock Entry"][3])
 		repack.posting_date = nowdate()
 		repack.posting_time = nowtime()
 		repack.set_stock_entry_type()
@@ -534,10 +547,10 @@ class TestStockEntry(FrappeTestCase):
 		self.assertTrue(sle)
 		sle.sort(key=lambda x: x[1])
 
-		for i, sle in enumerate(sle):
-			self.assertEqual(expected_sle[i][0], sle[0])
-			self.assertEqual(expected_sle[i][1], sle[1])
-			self.assertEqual(expected_sle[i][2], sle[2])
+		for i, sle_value in enumerate(sle):
+			self.assertEqual(expected_sle[i][0], sle_value[0])
+			self.assertEqual(expected_sle[i][1], sle_value[1])
+			self.assertEqual(expected_sle[i][2], sle_value[2])
 
 	def check_gl_entries(self, voucher_type, voucher_no, expected_gl_entries):
 		expected_gl_entries.sort(key=lambda x: x[0])
@@ -558,7 +571,7 @@ class TestStockEntry(FrappeTestCase):
 			self.assertEqual(expected_gl_entries[i][2], gle[2])
 
 	def test_serial_no_not_reqd(self):
-		se = frappe.copy_doc(test_records[0])
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		se.get("items")[0].serial_no = "ABCD"
 
 		bundle_id = make_serial_batch_bundle(
@@ -580,7 +593,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertRaises(frappe.ValidationError, bundle_id.make_serial_and_batch_bundle)
 
 	def test_serial_no_reqd(self):
-		se = frappe.copy_doc(test_records[0])
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		se.get("items")[0].item_code = "_Test Serialized Item"
 		se.get("items")[0].qty = 2
 		se.get("items")[0].transfer_qty = 2
@@ -603,7 +616,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertRaises(frappe.ValidationError, bundle_id.make_serial_and_batch_bundle)
 
 	def test_serial_no_qty_less(self):
-		se = frappe.copy_doc(test_records[0])
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		se.get("items")[0].item_code = "_Test Serialized Item"
 		se.get("items")[0].qty = 2
 		se.get("items")[0].serial_no = "ABCD"
@@ -636,7 +649,7 @@ class TestStockEntry(FrappeTestCase):
 				doc.item_code = "_Test Serialized Item"
 				doc.insert(ignore_permissions=True)
 
-		se = frappe.copy_doc(test_records[0])
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		se.get("items")[0].item_code = "_Test Serialized Item"
 		se.get("items")[0].qty = 2
 		se.get("items")[0].transfer_qty = 2
@@ -668,7 +681,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertFalse(frappe.db.get_value("Serial No", "ABCD1", "warehouse"))
 
 	def test_serial_by_series(self):
-		se = make_serialized_item()
+		se = make_serialized_item(self)
 
 		serial_nos = get_serial_nos_from_bundle(se.get("items")[0].serial_and_batch_bundle)
 
@@ -678,10 +691,11 @@ class TestStockEntry(FrappeTestCase):
 		return se, serial_nos
 
 	def test_serial_move(self):
-		se = make_serialized_item()
+		se = make_serialized_item(self)
 		serial_no = get_serial_nos_from_bundle(se.get("items")[0].serial_and_batch_bundle)[0]
+		frappe.flags.use_serial_and_batch_fields = True
 
-		se = frappe.copy_doc(test_records[0])
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		se.purpose = "Material Transfer"
 		se.get("items")[0].item_code = "_Test Serialized Item With Series"
 		se.get("items")[0].qty = 1
@@ -692,14 +706,11 @@ class TestStockEntry(FrappeTestCase):
 		se.set_stock_entry_type()
 		se.insert()
 		se.submit()
-		self.assertTrue(
-			frappe.db.get_value("Serial No", serial_no, "warehouse"), "_Test Warehouse 1 - _TC"
-		)
+		self.assertTrue(frappe.db.get_value("Serial No", serial_no, "warehouse"), "_Test Warehouse 1 - _TC")
 
 		se.cancel()
-		self.assertTrue(
-			frappe.db.get_value("Serial No", serial_no, "warehouse"), "_Test Warehouse - _TC"
-		)
+		self.assertTrue(frappe.db.get_value("Serial No", serial_no, "warehouse"), "_Test Warehouse - _TC")
+		frappe.flags.use_serial_and_batch_fields = False
 
 	def test_serial_cancel(self):
 		se, serial_nos = self.test_serial_by_series()
@@ -730,9 +741,7 @@ class TestStockEntry(FrappeTestCase):
 		else:
 			item = frappe.get_doc("Item", {"item_name": "Batched and Serialised Item"})
 
-		se = make_stock_entry(
-			item_code=item.item_code, target="_Test Warehouse - _TC", qty=1, basic_rate=100
-		)
+		se = make_stock_entry(item_code=item.item_code, target="_Test Warehouse - _TC", qty=1, basic_rate=100)
 		batch_no = get_batch_from_bundle(se.items[0].serial_and_batch_bundle)
 		serial_no = get_serial_nos_from_bundle(se.items[0].serial_and_batch_bundle)[0]
 		batch_qty = get_batch_qty(batch_no, "_Test Warehouse - _TC", item.item_code)
@@ -748,7 +757,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertEqual(frappe.db.get_value("Serial No", serial_no, "warehouse"), None)
 
 	def test_warehouse_company_validation(self):
-		company = frappe.db.get_value("Warehouse", "_Test Warehouse 2 - _TC1", "company")
+		frappe.db.get_value("Warehouse", "_Test Warehouse 2 - _TC1", "company")
 		frappe.get_doc("User", "test2@example.com").add_roles(
 			"Sales User", "Sales Manager", "Stock User", "Stock Manager"
 		)
@@ -756,7 +765,7 @@ class TestStockEntry(FrappeTestCase):
 
 		from erpnext.stock.utils import InvalidWarehouseCompany
 
-		st1 = frappe.copy_doc(test_records[0])
+		st1 = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		st1.get("items")[0].t_warehouse = "_Test Warehouse 2 - _TC1"
 		st1.set_stock_entry_type()
 		st1.insert()
@@ -775,7 +784,7 @@ class TestStockEntry(FrappeTestCase):
 			"Sales User", "Sales Manager", "Stock User", "Stock Manager"
 		)
 
-		st1 = frappe.copy_doc(test_records[0])
+		st1 = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		st1.company = "_Test Company 1"
 
 		frappe.set_user("test@example.com")
@@ -785,7 +794,7 @@ class TestStockEntry(FrappeTestCase):
 		test_user.add_roles("System Manager")
 
 		frappe.set_user("test2@example.com")
-		st1 = frappe.copy_doc(test_records[0])
+		st1 = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		st1.company = "_Test Company 1"
 		st1.get("items")[0].t_warehouse = "_Test Warehouse 2 - _TC1"
 		st1.get("items")[0].expense_account = "Stock Adjustment - _TC1"
@@ -805,14 +814,14 @@ class TestStockEntry(FrappeTestCase):
 
 		# test freeze_stocks_upto
 		frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", add_days(nowdate(), 5))
-		se = frappe.copy_doc(test_records[0]).insert()
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0]).insert()
 		self.assertRaises(StockFreezeError, se.submit)
 
 		frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", "")
 
 		# test freeze_stocks_upto_days
 		frappe.db.set_single_value("Stock Settings", "stock_frozen_upto_days", -1)
-		se = frappe.copy_doc(test_records[0])
+		se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 		se.set_posting_time = 1
 		se.posting_date = nowdate()
 		se.set_stock_entry_type()
@@ -854,14 +863,10 @@ class TestStockEntry(FrappeTestCase):
 		for d in stock_entry.get("items"):
 			if d.item_code != "_Test FG Item 2":
 				rm_cost += flt(d.amount)
-		fg_cost = list(filter(lambda x: x.item_code == "_Test FG Item 2", stock_entry.get("items")))[
-			0
-		].amount
-		self.assertEqual(
-			fg_cost, flt(rm_cost + bom_operation_cost + work_order.additional_operating_cost, 2)
-		)
+		fg_cost = next(filter(lambda x: x.item_code == "_Test FG Item 2", stock_entry.get("items"))).amount
+		self.assertEqual(fg_cost, flt(rm_cost + bom_operation_cost + work_order.additional_operating_cost, 2))
 
-	@change_settings("Manufacturing Settings", {"material_consumption": 1})
+	@IntegrationTestCase.change_settings("Manufacturing Settings", {"material_consumption": 1})
 	def test_work_order_manufacture_with_material_consumption(self):
 		from erpnext.manufacturing.doctype.work_order.work_order import (
 			make_stock_entry as _make_stock_entry,
@@ -902,8 +907,8 @@ class TestStockEntry(FrappeTestCase):
 		for d in s.get("items"):
 			if d.s_warehouse:
 				rm_cost += d.amount
-		fg_cost = list(filter(lambda x: x.item_code == "_Test FG Item", s.get("items")))[0].amount
-		scrap_cost = list(filter(lambda x: x.is_scrap_item, s.get("items")))[0].amount
+		fg_cost = next(filter(lambda x: x.item_code == "_Test FG Item", s.get("items"))).amount
+		scrap_cost = next(filter(lambda x: x.is_scrap_item, s.get("items"))).amount
 		self.assertEqual(fg_cost, flt(rm_cost - scrap_cost, 2))
 
 		# When Stock Entry has only FG + Scrap
@@ -917,13 +922,11 @@ class TestStockEntry(FrappeTestCase):
 				rm_cost += d.amount
 		self.assertEqual(rm_cost, 0)
 		expected_fg_cost = s.get_basic_rate_for_manufactured_item(1)
-		fg_cost = list(filter(lambda x: x.item_code == "_Test FG Item", s.get("items")))[0].amount
+		fg_cost = next(filter(lambda x: x.item_code == "_Test FG Item", s.get("items"))).amount
 		self.assertEqual(flt(fg_cost, 2), flt(expected_fg_cost, 2))
 
 	def test_variant_work_order(self):
-		bom_no = frappe.db.get_value(
-			"BOM", {"item": "_Test Variant Item", "is_default": 1, "docstatus": 1}
-		)
+		bom_no = frappe.db.get_value("BOM", {"item": "_Test Variant Item", "is_default": 1, "docstatus": 1})
 
 		make_item_variant()  # make variant of _Test Variant Item if absent
 
@@ -985,141 +988,86 @@ class TestStockEntry(FrappeTestCase):
 
 		self.assertRaises(frappe.ValidationError, ste.submit)
 
-	def test_same_serial_nos_in_repack_or_manufacture_entries(self):
-		s1 = make_serialized_item(target_warehouse="_Test Warehouse - _TC")
-		serial_nos = get_serial_nos_from_bundle(s1.get("items")[0].serial_and_batch_bundle)
-
-		s2 = make_stock_entry(
-			item_code="_Test Serialized Item With Series",
-			source="_Test Warehouse - _TC",
-			qty=2,
-			basic_rate=100,
-			purpose="Repack",
-			serial_no=serial_nos,
-			do_not_save=True,
+	def test_quality_check_for_scrap_item(self):
+		from erpnext.manufacturing.doctype.work_order.work_order import (
+			make_stock_entry as _make_stock_entry,
 		)
 
-		cls_obj = SerialBatchCreation(
+		scrap_item = "_Test Scrap Item 1"
+		make_item(scrap_item, {"is_stock_item": 1, "is_purchase_item": 0})
+
+		bom_name = frappe.db.get_value("BOM Scrap Item", {"docstatus": 1}, "parent")
+		production_item = frappe.db.get_value("BOM", bom_name, "item")
+
+		work_order = frappe.new_doc("Work Order")
+		work_order.production_item = production_item
+		work_order.update(
 			{
-				"type_of_transaction": "Inward",
-				"serial_and_batch_bundle": s2.items[0].serial_and_batch_bundle,
-				"item_code": "_Test Serialized Item",
+				"company": "_Test Company",
+				"fg_warehouse": "_Test Warehouse 1 - _TC",
+				"production_item": production_item,
+				"bom_no": bom_name,
+				"qty": 1.0,
+				"stock_uom": frappe.db.get_value("Item", production_item, "stock_uom"),
+				"skip_transfer": 1,
 			}
 		)
 
-		cls_obj.duplicate_package()
-		bundle_id = cls_obj.serial_and_batch_bundle
-		doc = frappe.get_doc("Serial and Batch Bundle", bundle_id)
-		doc.db_set(
-			{
-				"item_code": "_Test Serialized Item",
-				"warehouse": "_Test Warehouse - _TC",
-			}
-		)
+		work_order.get_items_and_operations_from_bom()
+		work_order.submit()
 
-		doc.load_from_db()
+		stock_entry = frappe.get_doc(_make_stock_entry(work_order.name, "Manufacture", 1))
+		for row in stock_entry.items:
+			if row.s_warehouse:
+				make_stock_entry(
+					item_code=row.item_code,
+					target=row.s_warehouse,
+					qty=row.qty,
+					basic_rate=row.basic_rate or 100,
+				)
 
-		s2.append(
-			"items",
-			{
-				"item_code": "_Test Serialized Item",
-				"t_warehouse": "_Test Warehouse - _TC",
-				"qty": 2,
-				"basic_rate": 120,
-				"expense_account": "Stock Adjustment - _TC",
-				"conversion_factor": 1.0,
-				"cost_center": "_Test Cost Center - _TC",
-				"serial_and_batch_bundle": bundle_id,
-			},
-		)
+			if row.is_scrap_item:
+				row.item_code = scrap_item
+				row.uom = frappe.db.get_value("Item", scrap_item, "stock_uom")
+				row.stock_uom = frappe.db.get_value("Item", scrap_item, "stock_uom")
 
-		s2.submit()
-		s2.cancel()
+		stock_entry.inspection_required = 1
+		stock_entry.save()
 
-	# def test_retain_sample(self):
-	# 	from erpnext.stock.doctype.batch.batch import get_batch_qty
-	# 	from erpnext.stock.doctype.warehouse.test_warehouse import create_warehouse
+		self.assertTrue([row.item_code for row in stock_entry.items if row.is_scrap_item])
 
-	# 	create_warehouse("Test Warehouse for Sample Retention")
-	# 	frappe.db.set_value(
-	# 		"Stock Settings",
-	# 		None,
-	# 		"sample_retention_warehouse",
-	# 		"Test Warehouse for Sample Retention - _TC",
-	# 	)
+		for row in stock_entry.items:
+			if not row.is_scrap_item:
+				qc = frappe.get_doc(
+					{
+						"doctype": "Quality Inspection",
+						"reference_name": stock_entry.name,
+						"inspected_by": "Administrator",
+						"reference_type": "Stock Entry",
+						"inspection_type": "In Process",
+						"status": "Accepted",
+						"sample_size": 1,
+						"item_code": row.item_code,
+					}
+				)
 
-	# 	test_item_code = "Retain Sample Item"
-	# 	if not frappe.db.exists("Item", test_item_code):
-	# 		item = frappe.new_doc("Item")
-	# 		item.item_code = test_item_code
-	# 		item.item_name = "Retain Sample Item"
-	# 		item.description = "Retain Sample Item"
-	# 		item.item_group = "All Item Groups"
-	# 		item.is_stock_item = 1
-	# 		item.has_batch_no = 1
-	# 		item.create_new_batch = 1
-	# 		item.retain_sample = 1
-	# 		item.sample_quantity = 4
-	# 		item.save()
+				qc_name = qc.submit()
+				row.quality_inspection = qc_name
 
-	# 	receipt_entry = frappe.new_doc("Stock Entry")
-	# 	receipt_entry.company = "_Test Company"
-	# 	receipt_entry.purpose = "Material Receipt"
-	# 	receipt_entry.append(
-	# 		"items",
-	# 		{
-	# 			"item_code": test_item_code,
-	# 			"t_warehouse": "_Test Warehouse - _TC",
-	# 			"qty": 40,
-	# 			"basic_rate": 12,
-	# 			"cost_center": "_Test Cost Center - _TC",
-	# 			"sample_quantity": 4,
-	# 		},
-	# 	)
-	# 	receipt_entry.set_stock_entry_type()
-	# 	receipt_entry.insert()
-	# 	receipt_entry.submit()
-
-	# 	retention_data = move_sample_to_retention_warehouse(
-	# 		receipt_entry.company, receipt_entry.get("items")
-	# 	)
-	# 	retention_entry = frappe.new_doc("Stock Entry")
-	# 	retention_entry.company = retention_data.company
-	# 	retention_entry.purpose = retention_data.purpose
-	# 	retention_entry.append(
-	# 		"items",
-	# 		{
-	# 			"item_code": test_item_code,
-	# 			"t_warehouse": "Test Warehouse for Sample Retention - _TC",
-	# 			"s_warehouse": "_Test Warehouse - _TC",
-	# 			"qty": 4,
-	# 			"basic_rate": 12,
-	# 			"cost_center": "_Test Cost Center - _TC",
-	# 			"batch_no": get_batch_from_bundle(receipt_entry.get("items")[0].serial_and_batch_bundle),
-	# 		},
-	# 	)
-	# 	retention_entry.set_stock_entry_type()
-	# 	retention_entry.insert()
-	# 	retention_entry.submit()
-
-	# 	qty_in_usable_warehouse = get_batch_qty(
-	# 		get_batch_from_bundle(receipt_entry.get("items")[0].serial_and_batch_bundle), "_Test Warehouse - _TC", "_Test Item"
-	# 	)
-	# 	qty_in_retention_warehouse = get_batch_qty(
-	# 		get_batch_from_bundle(receipt_entry.get("items")[0].serial_and_batch_bundle),
-	# 		"Test Warehouse for Sample Retention - _TC",
-	# 		"_Test Item",
-	# 	)
-
-	# 	self.assertEqual(qty_in_usable_warehouse, 36)
-	# 	self.assertEqual(qty_in_retention_warehouse, 4)
+		stock_entry.reload()
+		stock_entry.submit()
+		for row in stock_entry.items:
+			if row.is_scrap_item:
+				self.assertFalse(row.quality_inspection)
+			else:
+				self.assertTrue(row.quality_inspection)
 
 	def test_quality_check(self):
 		item_code = "_Test Item For QC"
 		if not frappe.db.exists("Item", item_code):
 			create_item(item_code)
 
-		repack = frappe.copy_doc(test_records[3])
+		repack = frappe.copy_doc(self.globalTestRecords["Stock Entry"][3])
 		repack.inspection_required = 1
 		for d in repack.items:
 			if not d.s_warehouse and d.t_warehouse:
@@ -1133,9 +1081,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertRaises(frappe.ValidationError, repack.submit)
 
 	def test_customer_provided_parts_se(self):
-		create_item(
-			"CUST-0987", is_customer_provided_item=1, customer="_Test Customer", is_purchase_item=0
-		)
+		create_item("CUST-0987", is_customer_provided_item=1, customer="_Test Customer", is_purchase_item=0)
 		se = make_stock_entry(
 			item_code="CUST-0987", purpose="Material Receipt", qty=4, to_warehouse="_Test Warehouse - _TC"
 		)
@@ -1250,14 +1196,12 @@ class TestStockEntry(FrappeTestCase):
 		self.check_gl_entries(
 			"Stock Entry",
 			se.name,
-			sorted(
-				[["Stock Adjustment - TCP1", 100.0, 0.0], ["Miscellaneous Expenses - TCP1", 0.0, 100.0]]
-			),
+			sorted([["Stock Adjustment - TCP1", 100.0, 0.0], ["Miscellaneous Expenses - TCP1", 0.0, 100.0]]),
 		)
 
 	def test_conversion_factor_change(self):
 		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
-		repack_entry = frappe.copy_doc(test_records[3])
+		repack_entry = frappe.copy_doc(self.globalTestRecords["Stock Entry"][3])
 		repack_entry.posting_date = nowdate()
 		repack_entry.posting_time = nowtime()
 		repack_entry.set_stock_entry_type()
@@ -1345,7 +1289,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertEqual(se.value_difference, 0.0)
 		self.assertEqual(se.total_incoming_value, se.total_outgoing_value)
 
-	@change_settings("Stock Settings", {"allow_negative_stock": 0})
+	@IntegrationTestCase.change_settings("Stock Settings", {"allow_negative_stock": 0})
 	def test_future_negative_sle(self):
 		# Initialize item, batch, warehouse, opening qty
 		item_code = "_Test Future Neg Item"
@@ -1388,7 +1332,7 @@ class TestStockEntry(FrappeTestCase):
 
 		self.assertRaises(NegativeStockError, create_stock_entries, sequence_of_entries)
 
-	@change_settings("Stock Settings", {"allow_negative_stock": 0})
+	@IntegrationTestCase.change_settings("Stock Settings", {"allow_negative_stock": 0})
 	def test_future_negative_sle_batch(self):
 		from erpnext.stock.doctype.batch.test_batch import TestBatch
 
@@ -1416,7 +1360,7 @@ class TestStockEntry(FrappeTestCase):
 		)
 		batch_nos.append(get_batch_from_bundle(se2.items[0].serial_and_batch_bundle))
 
-		with self.assertRaises(frappe.ValidationError) as nse:
+		with self.assertRaises(frappe.ValidationError):
 			make_stock_entry(
 				item_code=item_code,
 				qty=1,
@@ -1516,7 +1460,7 @@ class TestStockEntry(FrappeTestCase):
 		self.assertEqual(se.items[0].item_name, item.item_name)
 		self.assertEqual(se.items[0].stock_uom, item.stock_uom)
 
-	@change_settings("Stock Reposting Settings", {"item_based_reposting": 0})
+	@IntegrationTestCase.change_settings("Stock Reposting Settings", {"item_based_reposting": 0})
 	def test_reposting_for_depedent_warehouse(self):
 		from erpnext.stock.doctype.repost_item_valuation.repost_item_valuation import repost_sl_entries
 		from erpnext.stock.doctype.warehouse.test_warehouse import create_warehouse
@@ -1669,38 +1613,34 @@ class TestStockEntry(FrappeTestCase):
 			qty=4,
 			to_warehouse="_Test Warehouse - _TC",
 			batch_no=batch.name,
+			use_serial_batch_fields=1,
 			do_not_save=True,
 		)
 
 		self.assertRaises(BatchExpiredError, se.save)
 
 	def test_negative_stock_reco(self):
-		from erpnext.controllers.stock_controller import BatchExpiredError
-		from erpnext.stock.doctype.batch.test_batch import make_new_batch
-
 		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 0)
 
 		item_code = "Test Negative Item - 001"
-		item_doc = create_item(item_code=item_code, is_stock_item=1, valuation_rate=10)
+		create_item(item_code=item_code, is_stock_item=1, valuation_rate=10)
 
 		make_stock_entry(
 			item_code=item_code,
 			posting_date=add_days(today(), -3),
 			posting_time="00:00:00",
-			purpose="Material Receipt",
+			target="_Test Warehouse - _TC",
 			qty=10,
 			to_warehouse="_Test Warehouse - _TC",
-			do_not_save=True,
 		)
 
 		make_stock_entry(
 			item_code=item_code,
 			posting_date=today(),
 			posting_time="00:00:00",
-			purpose="Material Receipt",
+			source="_Test Warehouse - _TC",
 			qty=8,
 			from_warehouse="_Test Warehouse - _TC",
-			do_not_save=True,
 		)
 
 		sr_doc = create_stock_reconciliation(
@@ -1715,36 +1655,6 @@ class TestStockEntry(FrappeTestCase):
 		)
 
 		self.assertRaises(frappe.ValidationError, sr_doc.submit)
-
-	def test_enqueue_action(self):
-		frappe.flags.in_test = False
-		item_code = "Test Enqueue Item - 001"
-		create_item(item_code=item_code, is_stock_item=1, valuation_rate=10)
-
-		doc = make_stock_entry(
-			item_code=item_code,
-			posting_date=add_to_date(today(), months=-7),
-			posting_time="00:00:00",
-			purpose="Material Receipt",
-			qty=10,
-			to_warehouse="_Test Warehouse - _TC",
-			do_not_submit=True,
-		)
-
-		self.assertTrue(doc.is_enqueue_action())
-
-		doc = make_stock_entry(
-			item_code=item_code,
-			posting_date=today(),
-			posting_time="00:00:00",
-			purpose="Material Receipt",
-			qty=10,
-			to_warehouse="_Test Warehouse - _TC",
-			do_not_submit=True,
-		)
-
-		self.assertFalse(doc.is_enqueue_action())
-		frappe.flags.in_test = True
 
 	def test_negative_batch(self):
 		item_code = "Test Negative Batch Item - 001"
@@ -1827,10 +1737,198 @@ class TestStockEntry(FrappeTestCase):
 			mr.cancel()
 			mr.delete()
 
+	def test_auto_reorder_level_with_lead_time_days(self):
+		from erpnext.stock.reorder_item import reorder_item
 
-def make_serialized_item(**args):
+		item_doc = make_item(
+			"Test Auto Reorder Item - 002",
+			properties={"stock_uom": "Kg", "purchase_uom": "Nos", "is_stock_item": 1, "lead_time_days": 2},
+			uoms=[{"uom": "Nos", "conversion_factor": 5}],
+		)
+
+		if not frappe.db.exists("Item Reorder", {"parent": item_doc.name}):
+			item_doc.append(
+				"reorder_levels",
+				{
+					"warehouse_reorder_level": 0,
+					"warehouse_reorder_qty": 10,
+					"warehouse": "_Test Warehouse - _TC",
+					"material_request_type": "Purchase",
+				},
+			)
+
+		item_doc.save(ignore_permissions=True)
+
+		frappe.db.set_single_value("Stock Settings", "auto_indent", 1)
+
+		mr_list = reorder_item()
+
+		frappe.db.set_single_value("Stock Settings", "auto_indent", 0)
+		mrs = frappe.get_all(
+			"Material Request Item",
+			fields=["schedule_date"],
+			filters={"item_code": item_doc.name, "uom": "Nos"},
+		)
+
+		for mri in mrs:
+			self.assertEqual(getdate(mri.schedule_date), getdate(add_days(today(), 2)))
+
+		for mr in mr_list:
+			mr.cancel()
+			mr.delete()
+
+	def test_use_serial_and_batch_fields(self):
+		item = make_item(
+			"Test Use Serial and Batch Item SN Item",
+			{"has_serial_no": 1, "is_stock_item": 1},
+		)
+
+		serial_nos = [
+			"Test Use Serial and Batch Item SN Item - SN 001",
+			"Test Use Serial and Batch Item SN Item - SN 002",
+		]
+
+		se = make_stock_entry(
+			item_code=item.name,
+			qty=2,
+			to_warehouse="_Test Warehouse - _TC",
+			use_serial_batch_fields=1,
+			serial_no="\n".join(serial_nos),
+		)
+
+		self.assertTrue(se.items[0].use_serial_batch_fields)
+		self.assertTrue(se.items[0].serial_no)
+		self.assertTrue(se.items[0].serial_and_batch_bundle)
+
+		for serial_no in serial_nos:
+			self.assertTrue(frappe.db.exists("Serial No", serial_no))
+			self.assertEqual(frappe.db.get_value("Serial No", serial_no, "status"), "Active")
+
+		se1 = make_stock_entry(
+			item_code=item.name,
+			qty=2,
+			from_warehouse="_Test Warehouse - _TC",
+			use_serial_batch_fields=1,
+			serial_no="\n".join(serial_nos),
+		)
+
+		se1.reload()
+
+		self.assertTrue(se1.items[0].use_serial_batch_fields)
+		self.assertTrue(se1.items[0].serial_no)
+		self.assertTrue(se1.items[0].serial_and_batch_bundle)
+
+		for serial_no in serial_nos:
+			self.assertTrue(frappe.db.exists("Serial No", serial_no))
+			self.assertEqual(frappe.db.get_value("Serial No", serial_no, "status"), "Consumed")
+
+	def test_serial_batch_bundle_type_of_transaction(self):
+		item = make_item(
+			"Test Use Serial and Batch Item SN Item",
+			{
+				"has_batch_no": 1,
+				"is_stock_item": 1,
+				"create_new_batch": 1,
+				"batch_naming_series": "Test-SBBTYT-NNS.#####",
+			},
+		).name
+
+		se = make_stock_entry(
+			item_code=item,
+			qty=2,
+			target="_Test Warehouse - _TC",
+			use_serial_batch_fields=1,
+		)
+
+		batch_no = get_batch_from_bundle(se.items[0].serial_and_batch_bundle)
+
+		se = make_stock_entry(
+			item_code=item,
+			qty=2,
+			source="_Test Warehouse - _TC",
+			target="Stores - _TC",
+			use_serial_batch_fields=0,
+			batch_no=batch_no,
+			do_not_submit=True,
+		)
+
+		se.reload()
+		sbb = se.items[0].serial_and_batch_bundle
+		frappe.db.set_value("Serial and Batch Bundle", sbb, "type_of_transaction", "Inward")
+		self.assertRaises(frappe.ValidationError, se.submit)
+
+	def test_stock_entry_for_same_posting_date_and_time(self):
+		warehouse = "_Test Warehouse - _TC"
+		item_code = "Test Stock Entry For Same Posting Datetime 1"
+		make_item(item_code, {"is_stock_item": 1})
+		posting_date = nowdate()
+		posting_time = nowtime()
+
+		for index in range(25):
+			se = make_stock_entry(
+				item_code=item_code,
+				qty=1,
+				to_warehouse=warehouse,
+				posting_date=posting_date,
+				posting_time=posting_time,
+				do_not_submit=True,
+				purpose="Material Receipt",
+				basic_rate=100,
+			)
+
+			se.append(
+				"items",
+				{
+					"item_code": item_code,
+					"item_name": se.items[0].item_name,
+					"description": se.items[0].description,
+					"t_warehouse": se.items[0].t_warehouse,
+					"basic_rate": 100,
+					"qty": 1,
+					"stock_qty": 1,
+					"conversion_factor": 1,
+					"expense_account": se.items[0].expense_account,
+					"cost_center": se.items[0].cost_center,
+					"uom": se.items[0].uom,
+					"stock_uom": se.items[0].stock_uom,
+				},
+			)
+
+			se.remarks = f"The current number is {cstr(index)}"
+
+			se.submit()
+
+		sles = frappe.get_all(
+			"Stock Ledger Entry",
+			fields=[
+				"posting_date",
+				"posting_time",
+				"actual_qty",
+				"qty_after_transaction",
+				"incoming_rate",
+				"stock_value_difference",
+				"stock_value",
+			],
+			filters={"item_code": item_code, "warehouse": warehouse},
+			order_by="creation",
+		)
+
+		self.assertEqual(len(sles), 50)
+		i = 0
+		for sle in sles:
+			i += 1
+			self.assertEqual(getdate(sle.posting_date), getdate(posting_date))
+			self.assertEqual(get_time(sle.posting_time), get_time(posting_time))
+			self.assertEqual(sle.actual_qty, 1)
+			self.assertEqual(sle.qty_after_transaction, i)
+			self.assertEqual(sle.incoming_rate, 100)
+			self.assertEqual(sle.stock_value_difference, 100)
+			self.assertEqual(sle.stock_value, 100 * i)
+
+
+def make_serialized_item(self, **args):
 	args = frappe._dict(args)
-	se = frappe.copy_doc(test_records[0])
+	se = frappe.copy_doc(self.globalTestRecords["Stock Entry"][0])
 
 	if args.company:
 		se.company = args.company
@@ -1920,9 +2018,6 @@ def get_multiple_items():
 			"uom": "_Test UOM",
 		},
 	]
-
-
-test_records = frappe.get_test_records("Stock Entry")
 
 
 def initialize_records_for_future_negative_sle_test(

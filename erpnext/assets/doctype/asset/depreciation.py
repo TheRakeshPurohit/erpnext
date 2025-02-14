@@ -71,7 +71,10 @@ def post_depreciation_entries(date=None):
 		) not in credit_and_debit_accounts_for_asset_category_and_company:
 			credit_and_debit_accounts_for_asset_category_and_company.update(
 				{
-					(asset_category, asset_company): get_credit_and_debit_accounts_for_asset_category_and_company(
+					(
+						asset_category,
+						asset_company,
+					): get_credit_and_debit_accounts_for_asset_category_and_company(
 						asset_category, asset_company
 					),
 				}
@@ -135,9 +138,7 @@ def get_depreciable_asset_depr_schedules_data(date):
 
 def make_depreciation_entry_for_all_asset_depr_schedules(asset_doc, date=None):
 	for row in asset_doc.get("finance_books"):
-		asset_depr_schedule_name = get_asset_depr_schedule_name(
-			asset_doc.name, "Active", row.finance_book
-		)
+		asset_depr_schedule_name = get_asset_depr_schedule_name(asset_doc.name, "Active", row.finance_book)
 		make_depreciation_entry(asset_depr_schedule_name, date)
 
 
@@ -147,9 +148,7 @@ def get_acc_frozen_upto():
 	if not acc_frozen_upto:
 		return
 
-	frozen_accounts_modifier = frappe.db.get_single_value(
-		"Accounts Settings", "frozen_accounts_modifier"
-	)
+	frozen_accounts_modifier = frappe.db.get_single_value("Accounts Settings", "frozen_accounts_modifier")
 
 	if frozen_accounts_modifier not in frappe.get_roles() or frappe.session.user == "Administrator":
 		return getdate(acc_frozen_upto)
@@ -242,9 +241,7 @@ def make_depreciation_entry(
 				debit_account,
 				accounting_dimensions,
 			)
-			frappe.db.commit()
 		except Exception as e:
-			frappe.db.rollback()
 			depreciation_posting_error = e
 
 	asset.set_status()
@@ -280,9 +277,7 @@ def _make_journal_entry_for_depreciation(
 	je.posting_date = depr_schedule.schedule_date
 	je.company = asset.company
 	je.finance_book = asset_depr_schedule_doc.finance_book
-	je.remark = "Depreciation Entry against {0} worth {1}".format(
-		asset.name, depr_schedule.depreciation_amount
-	)
+	je.remark = f"Depreciation Entry against {asset.name} worth {depr_schedule.depreciation_amount}"
 
 	credit_entry = {
 		"account": credit_account,
@@ -328,6 +323,7 @@ def _make_journal_entry_for_depreciation(
 
 	if not je.meta.get_workflow():
 		je.submit()
+		asset.reload()
 		idx = cint(asset_depr_schedule_doc.finance_book_id)
 		row = asset.get("finance_books")[idx - 1]
 		row.value_after_depreciation -= depr_schedule.depreciation_amount
@@ -363,11 +359,7 @@ def get_depreciation_accounts(asset_category, company):
 		if not depreciation_expense_account:
 			depreciation_expense_account = accounts[1]
 
-	if (
-		not fixed_asset_account
-		or not accumulated_depreciation_account
-		or not depreciation_expense_account
-	):
+	if not fixed_asset_account or not accumulated_depreciation_account or not depreciation_expense_account:
 		frappe.throw(
 			_("Please set Depreciation related Accounts in Asset Category {0} or Company {1}").format(
 				asset_category, company
@@ -439,17 +431,19 @@ def get_comma_separated_links(names, doctype):
 
 
 @frappe.whitelist()
-def scrap_asset(asset_name):
+def scrap_asset(asset_name, scrap_date=None):
 	asset = frappe.get_doc("Asset", asset_name)
 
 	if asset.docstatus != 1:
 		frappe.throw(_("Asset {0} must be submitted").format(asset.name))
-	elif asset.status in ("Cancelled", "Sold", "Scrapped", "Capitalized", "Decapitalized"):
-		frappe.throw(
-			_("Asset {0} cannot be scrapped, as it is already {1}").format(asset.name, asset.status)
-		)
+	elif asset.status in ("Cancelled", "Sold", "Scrapped", "Capitalized"):
+		frappe.throw(_("Asset {0} cannot be scrapped, as it is already {1}").format(asset.name, asset.status))
 
-	date = today()
+	today_date = getdate(today())
+	date = getdate(scrap_date) or today_date
+	purchase_date = getdate(asset.purchase_date)
+
+	validate_scrap_date(date, today_date, purchase_date, asset.calculate_depreciation, asset_name)
 
 	notes = _("This schedule was created when Asset {0} was scrapped.").format(
 		get_link_to_form(asset.doctype, asset.name)
@@ -458,16 +452,14 @@ def scrap_asset(asset_name):
 	depreciate_asset(asset, date, notes)
 	asset.reload()
 
-	depreciation_series = frappe.get_cached_value(
-		"Company", asset.company, "series_for_depreciation_entry"
-	)
+	depreciation_series = frappe.get_cached_value("Company", asset.company, "series_for_depreciation_entry")
 
 	je = frappe.new_doc("Journal Entry")
 	je.voucher_type = "Journal Entry"
 	je.naming_series = depreciation_series
 	je.posting_date = date
 	je.company = asset.company
-	je.remark = "Scrap Entry for asset {0}".format(asset_name)
+	je.remark = f"Scrap Entry for asset {asset_name}"
 
 	for entry in get_gl_entries_on_asset_disposal(asset, date):
 		entry.update({"reference_type": "Asset", "reference_name": asset_name})
@@ -483,6 +475,36 @@ def scrap_asset(asset_name):
 	add_asset_activity(asset_name, _("Asset scrapped"))
 
 	frappe.msgprint(_("Asset scrapped via Journal Entry {0}").format(je.name))
+
+
+def validate_scrap_date(scrap_date, today_date, purchase_date, calculate_depreciation, asset_name):
+	if scrap_date > today_date:
+		frappe.throw(_("Future date is not allowed"))
+	elif scrap_date < purchase_date:
+		frappe.throw(_("Scrap date cannot be before purchase date"))
+
+	if calculate_depreciation:
+		asset_depreciation_schedules = frappe.db.get_all(
+			"Asset Depreciation Schedule", filters={"asset": asset_name, "docstatus": 1}, fields=["name"]
+		)
+
+		for depreciation_schedule in asset_depreciation_schedules:
+			last_booked_depreciation_date = frappe.db.get_value(
+				"Depreciation Schedule",
+				{
+					"parent": depreciation_schedule["name"],
+					"docstatus": 1,
+					"journal_entry": ["!=", ""],
+				},
+				"schedule_date",
+				order_by="schedule_date desc",
+			)
+			if (
+				last_booked_depreciation_date
+				and scrap_date < last_booked_depreciation_date
+				and scrap_date > purchase_date
+			):
+				frappe.throw(_("Asset cannot be scrapped before the last depreciation entry."))
 
 
 @frappe.whitelist()
@@ -515,14 +537,13 @@ def depreciate_asset(asset_doc, date, notes):
 
 	asset_doc.flags.ignore_validate_update_after_submit = True
 
-	make_new_active_asset_depr_schedules_and_cancel_current_ones(
-		asset_doc, notes, date_of_disposal=date
-	)
+	make_new_active_asset_depr_schedules_and_cancel_current_ones(asset_doc, notes, date_of_disposal=date)
 
 	asset_doc.save()
 
 	make_depreciation_entry_for_all_asset_depr_schedules(asset_doc, date)
 
+	asset_doc.reload()
 	cancel_depreciation_entries(asset_doc, date)
 
 
@@ -537,9 +558,7 @@ def reset_depreciation_schedule(asset_doc, date, notes):
 
 	asset_doc.flags.ignore_validate_update_after_submit = True
 
-	make_new_active_asset_depr_schedules_and_cancel_current_ones(
-		asset_doc, notes, date_of_return=date
-	)
+	make_new_active_asset_depr_schedules_and_cancel_current_ones(asset_doc, notes, date_of_return=date)
 
 	modify_depreciation_schedule_for_asset_repairs(asset_doc, notes)
 
@@ -561,15 +580,14 @@ def modify_depreciation_schedule_for_asset_repairs(asset, notes):
 def reverse_depreciation_entry_made_after_disposal(asset, date):
 	for row in asset.get("finance_books"):
 		asset_depr_schedule_doc = get_asset_depr_schedule_doc(asset.name, "Active", row.finance_book)
-		if not asset_depr_schedule_doc:
+		if not asset_depr_schedule_doc or not asset_depr_schedule_doc.get("depreciation_schedule"):
 			continue
 
 		for schedule_idx, schedule in enumerate(asset_depr_schedule_doc.get("depreciation_schedule")):
-			if schedule.schedule_date == date:
+			if schedule.schedule_date == date and schedule.journal_entry:
 				if not disposal_was_made_on_original_schedule_date(
 					schedule_idx, row, date
 				) or disposal_happens_in_the_future(date):
-
 					reverse_journal_entry = make_reverse_journal_entry(schedule.journal_entry)
 					reverse_journal_entry.posting_date = nowdate()
 
@@ -783,9 +801,7 @@ def get_disposal_account_and_cost_center(company):
 	)
 
 	if not disposal_account:
-		frappe.throw(
-			_("Please set 'Gain/Loss Account on Asset Disposal' in Company {0}").format(company)
-		)
+		frappe.throw(_("Please set 'Gain/Loss Account on Asset Disposal' in Company {0}").format(company))
 	if not depreciation_cost_center:
 		frappe.throw(_("Please set 'Asset Depreciation Cost Center' in Company {0}").format(company))
 
@@ -798,7 +814,7 @@ def get_value_after_depreciation_on_disposal_date(asset, disposal_date, finance_
 
 	if asset_doc.available_for_use_date > getdate(disposal_date):
 		frappe.throw(
-			"Disposal date {0} cannot be before available for use date {1} of the asset.".format(
+			"Disposal date {} cannot be before available for use date {} of the asset.".format(
 				disposal_date, asset_doc.available_for_use_date
 			)
 		)

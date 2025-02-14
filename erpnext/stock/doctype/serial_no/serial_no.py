@@ -3,7 +3,6 @@
 
 
 import json
-from typing import List, Optional, Union
 
 import frappe
 from frappe import ValidationError, _
@@ -47,13 +46,11 @@ class SerialNo(StockController):
 		item_group: DF.Link | None
 		item_name: DF.Data | None
 		location: DF.Link | None
-		maintenance_status: DF.Literal[
-			"", "Under Warranty", "Out of Warranty", "Under AMC", "Out of AMC"
-		]
+		maintenance_status: DF.Literal["", "Under Warranty", "Out of Warranty", "Under AMC", "Out of AMC"]
 		purchase_document_no: DF.Data | None
 		purchase_rate: DF.Float
 		serial_no: DF.Data
-		status: DF.Literal["", "Active", "Inactive", "Delivered", "Expired"]
+		status: DF.Literal["", "Active", "Inactive", "Consumed", "Delivered", "Expired"]
 		warehouse: DF.Link | None
 		warranty_expiry_date: DF.Date | None
 		warranty_period: DF.Int
@@ -61,7 +58,7 @@ class SerialNo(StockController):
 	# end: auto-generated types
 
 	def __init__(self, *args, **kwargs):
-		super(SerialNo, self).__init__(*args, **kwargs)
+		super().__init__(*args, **kwargs)
 		self.via_stock_ledger = False
 
 	def validate(self):
@@ -121,9 +118,9 @@ class SerialNo(StockController):
 			)
 
 
-def get_available_serial_nos(serial_no_series, qty) -> List[str]:
+def get_available_serial_nos(serial_no_series, qty) -> list[str]:
 	serial_nos = []
-	for i in range(cint(qty)):
+	for _i in range(cint(qty)):
 		serial_nos.append(get_new_serial_number(serial_no_series))
 
 	return serial_nos
@@ -138,22 +135,18 @@ def get_new_serial_number(series):
 
 def get_items_html(serial_nos, item_code):
 	body = ", ".join(serial_nos)
-	return """<details><summary>
-		<b>{0}:</b> {1} Serial Numbers <span class="caret"></span>
+	return f"""<details><summary>
+		<b>{item_code}:</b> {len(serial_nos)} Serial Numbers <span class="caret"></span>
 	</summary>
-	<div class="small">{2}</div></details>
-	""".format(
-		item_code, len(serial_nos), body
-	)
+	<div class="small">{body}</div></details>
+	"""
 
 
 def get_serial_nos(serial_no):
 	if isinstance(serial_no, list):
 		return serial_no
 
-	return [
-		s.strip() for s in cstr(serial_no).strip().upper().replace(",", "\n").split("\n") if s.strip()
-	]
+	return [s.strip() for s in cstr(serial_no).strip().replace(",", "\n").split("\n") if s.strip()]
 
 
 def clean_serial_no_string(serial_no: str) -> str:
@@ -176,34 +169,16 @@ def update_maintenance_status():
 		frappe.db.set_value("Serial No", doc.name, "maintenance_status", doc.maintenance_status)
 
 
-def get_delivery_note_serial_no(item_code, qty, delivery_note):
-	serial_nos = ""
-	dn_serial_nos = frappe.db.sql_list(
-		""" select name from `tabSerial No`
-		where item_code = %(item_code)s and delivery_document_no = %(delivery_note)s
-		and sales_invoice is null limit {0}""".format(
-			cint(qty)
-		),
-		{"item_code": item_code, "delivery_note": delivery_note},
-	)
-
-	if dn_serial_nos and len(dn_serial_nos) > 0:
-		serial_nos = "\n".join(dn_serial_nos)
-
-	return serial_nos
-
-
 @frappe.whitelist()
 def auto_fetch_serial_number(
 	qty: int,
 	item_code: str,
 	warehouse: str,
-	posting_date: Optional[str] = None,
-	batch_nos: Optional[Union[str, List[str]]] = None,
-	for_doctype: Optional[str] = None,
+	posting_date: str | None = None,
+	batch_nos: str | list[str] | None = None,
+	for_doctype: str | None = None,
 	exclude_sr_nos=None,
-) -> List[str]:
-
+) -> list[str]:
 	filters = frappe._dict({"item_code": item_code, "warehouse": warehouse})
 
 	if exclude_sr_nos is None:

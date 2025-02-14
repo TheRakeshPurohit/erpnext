@@ -41,6 +41,7 @@ class Employee(NestedSet):
 		self.validate_email()
 		self.validate_status()
 		self.validate_reports_to()
+		self.set_preferred_email()
 		self.validate_preferred_email()
 
 		if self.user_id:
@@ -63,14 +64,12 @@ class Employee(NestedSet):
 
 	def validate_user_details(self):
 		if self.user_id:
-			data = frappe.db.get_value("User", self.user_id, ["enabled", "user_image"], as_dict=1)
+			data = frappe.db.get_value("User", self.user_id, ["enabled"], as_dict=1)
 
 			if not data:
 				self.user_id = None
 				return
 
-			if data.get("user_image") and self.image == "":
-				self.image = data.get("user_image")
 			self.validate_for_enabled_user_id(data.get("enabled", 0))
 			self.validate_duplicate_user_id()
 
@@ -160,9 +159,7 @@ class Employee(NestedSet):
 
 	def set_preferred_email(self):
 		preferred_email_field = frappe.scrub(self.prefered_contact_email)
-		if preferred_email_field:
-			preferred_email = self.get(preferred_email_field)
-			self.prefered_email = preferred_email
+		self.prefered_email = self.get(preferred_email_field) if preferred_email_field else None
 
 	def validate_status(self):
 		if self.status == "Left":
@@ -241,16 +238,12 @@ def validate_employee_role(doc, method=None, ignore_emp_check=False):
 
 	user_roles = [d.role for d in doc.get("roles")]
 	if "Employee" in user_roles:
-		frappe.msgprint(
-			_("User {0}: Removed Employee role as there is no mapped employee.").format(doc.name)
-		)
+		frappe.msgprint(_("User {0}: Removed Employee role as there is no mapped employee.").format(doc.name))
 		doc.get("roles").remove(doc.get("roles", {"role": "Employee"})[0])
 
 	if "Employee Self Service" in user_roles:
 		frappe.msgprint(
-			_("User {0}: Removed Employee Self Service role as there is no mapped employee.").format(
-				doc.name
-			)
+			_("User {0}: Removed Employee Self Service role as there is no mapped employee.").format(doc.name)
 		)
 		doc.get("roles").remove(doc.get("roles", {"role": "Employee Self Service"})[0])
 
@@ -266,17 +259,13 @@ def update_user_permissions(doc, method):
 
 def get_employee_email(employee_doc):
 	return (
-		employee_doc.get("user_id")
-		or employee_doc.get("personal_email")
-		or employee_doc.get("company_email")
+		employee_doc.get("user_id") or employee_doc.get("personal_email") or employee_doc.get("company_email")
 	)
 
 
 def get_holiday_list_for_employee(employee, raise_exception=True):
 	if employee:
-		holiday_list, company = frappe.get_cached_value(
-			"Employee", employee, ["holiday_list", "company"]
-		)
+		holiday_list, company = frappe.get_cached_value("Employee", employee, ["holiday_list", "company"])
 	else:
 		holiday_list = ""
 		company = frappe.db.get_single_value("Global Defaults", "default_company")
@@ -292,9 +281,7 @@ def get_holiday_list_for_employee(employee, raise_exception=True):
 	return holiday_list
 
 
-def is_holiday(
-	employee, date=None, raise_exception=True, only_non_weekly=False, with_description=False
-):
+def is_holiday(employee, date=None, raise_exception=True, only_non_weekly=False, with_description=False):
 	"""
 	Returns True if given Employee has an holiday on the given date
 	        :param employee: Employee `name`
@@ -404,7 +391,6 @@ def get_employee_emails(employee_list):
 
 @frappe.whitelist()
 def get_children(doctype, parent=None, company=None, is_root=False, is_tree=False):
-
 	filters = [["status", "=", "Active"]]
 	if company and company != "All Companies":
 		filters.append(["company", "=", company])

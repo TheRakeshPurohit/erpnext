@@ -14,7 +14,7 @@ def setup_taxes_and_charges(company_name: str, country: str):
 		frappe.throw(_("Company {} does not exist yet. Taxes setup aborted.").format(company_name))
 
 	file_path = os.path.join(os.path.dirname(__file__), "..", "data", "country_wise_tax.json")
-	with open(file_path, "r") as json_file:
+	with open(file_path) as json_file:
 		tax_data = json.load(json_file)
 
 	country_wise_tax = tax_data.get(country)
@@ -54,7 +54,12 @@ def simple_to_detailed(templates):
 					{
 						"title": title,
 						"taxes": [
-							{"tax_type": {"account_name": data.get("account_name"), "tax_rate": data.get("tax_rate")}}
+							{
+								"tax_type": {
+									"account_name": data.get("account_name"),
+									"tax_rate": data.get("tax_rate"),
+								}
+							}
 						],
 					}
 					for title, data in templates.items()
@@ -81,7 +86,13 @@ def simple_to_detailed(templates):
 
 def from_detailed_data(company_name, data):
 	"""Create Taxes and Charges Templates from detailed data."""
-	coa_name = frappe.db.get_value("Company", company_name, "chart_of_accounts")
+	charts_company_name = company_name
+	if (
+		frappe.db.get_value("Company", company_name, "create_chart_of_accounts_based_on")
+		== "Existing Company"
+	):
+		charts_company_name = frappe.db.get_value("Company", company_name, "existing_company")
+	coa_name = frappe.db.get_value("Company", charts_company_name, "chart_of_accounts")
 	coa_data = data.get("chart_of_accounts", {})
 	tax_templates = coa_data.get(coa_name) or coa_data.get("*", {})
 	tax_categories = data.get("tax_categories")
@@ -110,9 +121,7 @@ def update_regional_tax_settings(country, company):
 	path = frappe.get_app_path("erpnext", "regional", frappe.scrub(country))
 	if os.path.exists(path.encode("utf-8")):
 		try:
-			module_name = "erpnext.regional.{0}.setup.update_regional_tax_settings".format(
-				frappe.scrub(country)
-			)
+			module_name = f"erpnext.regional.{frappe.scrub(country)}.setup.update_regional_tax_settings"
 			frappe.get_attr(module_name)(country, company)
 		except (ImportError, AttributeError):
 			pass
@@ -141,7 +150,7 @@ def make_taxes_and_charges_template(company_name, doctype, template):
 
 		# if account_head is a dict, search or create the account and get it's name
 		if isinstance(account_data, dict):
-			tax_row_defaults["description"] = "{0} @ {1}".format(
+			tax_row_defaults["description"] = "{} @ {}".format(
 				account_data.get("account_name"), account_data.get("tax_rate")
 			)
 			tax_row_defaults["rate"] = account_data.get("tax_rate")
@@ -160,7 +169,7 @@ def make_taxes_and_charges_template(company_name, doctype, template):
 	doc.flags.ignore_links = True
 	doc.flags.ignore_validate = True
 	doc.flags.ignore_mandatory = True
-	doc.insert(ignore_permissions=True)
+	doc.insert(ignore_permissions=True, ignore_if_duplicate=True)
 	return doc
 
 
@@ -193,7 +202,7 @@ def make_item_tax_template(company_name, template):
 	# Ingone validations to make doctypes faster
 	doc.flags.ignore_links = True
 	doc.flags.ignore_validate = True
-	doc.insert(ignore_permissions=True)
+	doc.insert(ignore_permissions=True, ignore_if_duplicate=True)
 	return doc
 
 
@@ -230,7 +239,7 @@ def get_or_create_account(company_name, account):
 	doc = frappe.get_doc(account)
 	doc.flags.ignore_links = True
 	doc.flags.ignore_validate = True
-	doc.insert(ignore_permissions=True, ignore_mandatory=True)
+	doc.insert(ignore_permissions=True, ignore_mandatory=True, ignore_if_duplicate=True)
 	return doc
 
 
@@ -283,7 +292,7 @@ def get_or_create_tax_group(company_name, root_type):
 
 	tax_group_account.flags.ignore_links = True
 	tax_group_account.flags.ignore_validate = True
-	tax_group_account.insert(ignore_permissions=True)
+	tax_group_account.insert(ignore_permissions=True, ignore_if_duplicate=True)
 
 	tax_group_name = tax_group_account.name
 

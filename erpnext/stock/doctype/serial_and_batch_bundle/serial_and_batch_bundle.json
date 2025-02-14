@@ -1,13 +1,12 @@
 {
  "actions": [],
- "autoname": "naming_series:",
+ "autoname": "hash",
  "creation": "2023-08-11 17:22:12.907518",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "item_details_tab",
-  "naming_series",
   "company",
   "item_name",
   "has_serial_no",
@@ -113,6 +112,7 @@
   {
    "fieldname": "voucher_no",
    "fieldtype": "Dynamic Link",
+   "in_standard_filter": 1,
    "label": "Voucher No",
    "no_copy": 1,
    "options": "voucher_type",
@@ -151,6 +151,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "avg_rate",
    "fieldtype": "Float",
    "label": "Avg Rate",
@@ -158,6 +159,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "total_amount",
    "fieldtype": "Float",
    "label": "Total Amount",
@@ -165,6 +167,7 @@
    "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "total_qty",
    "fieldtype": "Float",
    "label": "Total Qty",
@@ -193,12 +196,6 @@
    "options": "\nInward\nOutward\nMaintenance\nAsset Repair",
    "reqd": 1,
    "search_index": 1
-  },
-  {
-   "fieldname": "naming_series",
-   "fieldtype": "Select",
-   "label": "Naming Series",
-   "options": "SABB-.########"
   },
   {
    "default": "0",
@@ -250,11 +247,11 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2023-12-07 17:56:55.528563",
+ "modified": "2025-02-12 09:53:32.090309",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Serial and Batch Bundle",
- "naming_rule": "By \"Naming Series\" field",
+ "naming_rule": "Random",
  "owner": "Administrator",
  "permissions": [
   {
@@ -384,7 +381,7 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "title_field": "item_code"

@@ -2,6 +2,7 @@
 	display: grid;
 	grid-template-columns: repeat(10, minmax(0, 1fr));
 	gap: var(--margin-md);
+	padding: 1%;
 
 	section {
 		min-height: 45rem;
@@ -184,7 +185,6 @@
 						font-weight: 700;
 					}
 				}
-
 			}
 		}
 	}
@@ -261,12 +261,12 @@
 						flex-direction: column;
 						margin-right: auto;
 
-						>.customer-name {
+						> .customer-name {
 							font-weight: 700;
 							font-size: var(--text-lg);
 						}
 
-						>.customer-desc {
+						> .customer-desc {
 							font-weight: 500;
 							font-size: var(--text-sm);
 						}
@@ -277,7 +277,6 @@
 						align-items: center;
 						cursor: pointer;
 					}
-
 				}
 
 				> .customer-fields-container {
@@ -407,7 +406,6 @@
 							font-size: var(--text-lg);
 						}
 
-
 						> .item-name-desc {
 							@extend .nowrap;
 							display: flex;
@@ -455,7 +453,6 @@
 								}
 							}
 						}
-
 					}
 				}
 
@@ -772,7 +769,7 @@
 
 		.submit-order-btn {
 			@extend .primary-action;
-			background-color: var(--blue-500);
+			background-color: var(--primary-color);
 			color: white;
 		}
 
@@ -854,7 +851,7 @@
 			display: flex;
 			flex: 1;
 			height: 100%;
-    		position: relative;
+			position: relative;
 			justify-content: flex-end;
 
 			> .fields-section {
@@ -1130,7 +1127,6 @@
 					}
 				}
 
-
 				> .summary-btns {
 					display: flex;
 					justify-content: space-between;
@@ -1142,7 +1138,7 @@
 
 					> .new-btn {
 						background-color: var(--blue-500);
-						color:white;
+						color: white;
 						font-weight: 500;
 					}
 				}
@@ -1156,13 +1152,14 @@
 		grid-template-columns: repeat(1, minmax(0, 1fr));
 
 		> .items-selector {
-			grid-column: span 6 / span 1  !important;
+			grid-column: span 6 / span 1 !important;
 			> .items-container {
-			grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+				grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 			}
 		}
 
-		> .item-details-container, .customer-cart-container {
+		> .item-details-container,
+		.customer-cart-container {
 			grid-column: span 6 / span 1;
 		}
 
@@ -1179,7 +1176,7 @@
 			}
 		}
 
-		> .past-order-summary{
+		> .past-order-summary {
 			> .invoice-summary-wrapper {
 				width: 100%;
 			}

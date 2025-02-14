@@ -1,6 +1,8 @@
 # Copyright (c) 2023, Frappe Technologies Pvt. Ltd. and contributors
 # For license information, please see license.txt
 
+import json
+
 import frappe
 from frappe import _, qb
 from frappe.model.document import Document
@@ -82,11 +84,16 @@ class UnreconcilePayment(Document):
 			update_voucher_outstanding(
 				alloc.reference_doctype, alloc.reference_name, alloc.account, alloc.party_type, alloc.party
 			)
+			if doc.doctype in frappe.get_hooks("advance_payment_payable_doctypes") + frappe.get_hooks(
+				"advance_payment_receivable_doctypes"
+			):
+				doc.set_total_advance_paid()
+
 			frappe.db.set_value("Unreconcile Payment Entries", alloc.name, "unlinked", True)
 
 
 @frappe.whitelist()
-def doc_has_references(doctype: str = None, docname: str = None):
+def doc_has_references(doctype: str | None = None, docname: str | None = None):
 	if doctype in ["Sales Invoice", "Purchase Invoice"]:
 		return frappe.db.count(
 			"Payment Ledger Entry",
@@ -101,7 +108,7 @@ def doc_has_references(doctype: str = None, docname: str = None):
 
 @frappe.whitelist()
 def get_linked_payments_for_doc(
-	company: str = None, doctype: str = None, docname: str = None
+	company: str | None = None, doctype: str | None = None, docname: str | None = None
 ) -> list:
 	if company and doctype and docname:
 		_dt = doctype
@@ -158,7 +165,7 @@ def get_linked_payments_for_doc(
 @frappe.whitelist()
 def create_unreconcile_doc_for_selection(selections=None):
 	if selections:
-		selections = frappe.json.loads(selections)
+		selections = json.loads(selections)
 		# assuming each row is a unique voucher
 		for row in selections:
 			unrecon = frappe.new_doc("Unreconcile Payment")
